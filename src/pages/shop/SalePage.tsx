@@ -4,6 +4,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
 import { DealCard } from '../../components/cards';
+import { SaleBackdrop } from '../../components/SaleBackdrop';
 import { Countdown } from '../../components/controls';
 import { EmptyState, Skeleton } from '../../components/ui';
 import { discountPct, useDocumentTitle, useSale } from '../../lib/hooks';
@@ -30,7 +31,8 @@ export function SalePage() {
 
   return (
     <div className="grid gap-5">
-      <header className="inv flex flex-wrap items-end justify-between gap-5 rounded-2xl px-6 py-6 sm:px-7">
+      <header className="inv relative isolate flex flex-wrap items-end justify-between gap-5 overflow-hidden rounded-2xl px-6 py-6 sm:px-7">
+        <SaleBackdrop />
         <div className="grid gap-2">
           <nav className="flex items-center gap-1 text-xs text-muted" aria-label="Breadcrumb">
             <Link to="/" className="hover:underline">{t('nav.home')}</Link>

@@ -1,6 +1,6 @@
 import { useEffect, useMemo } from 'react';
 import { useBoughtToday, useDeals, useMe, useProducts, usePublicSettings } from '../api/queries';
-import { isDealLive } from '../domain/pricing';
+import { bandLabels, DEFAULT_BANDS, isDealLive, minQty } from '../domain/pricing';
 import { dealWindow, romeDateKey } from '../domain/romeTime';
 import type { Deal, Product } from '../domain/types';
 import { usePrefs } from '../store/prefs';
@@ -44,3 +44,10 @@ export function useDocumentTitle(page?: string) {
 export const useLang = () => usePrefs((s) => s.lang);
 
 export const discountPct = (regularCents: number, saleCents: number) => Math.round(((regularCents - saleCents) / regularCents) * 100);
+
+/** Quantity bands from Settings › Pricing: minimum per product line, band starts and labels ("3–20"). */
+export function useBands() {
+  const settings = usePublicSettings();
+  const bands = settings.data?.pricing ?? DEFAULT_BANDS;
+  return { bands, min: minQty(bands), labels: bandLabels(bands) };
+}

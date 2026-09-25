@@ -12,7 +12,7 @@ import { useDocumentTitle } from '../lib/hooks';
 import { OrderLines, OrderTotals } from './shop/OrderPage';
 
 /** Invoices are always a white page, whatever the app theme (emails and printouts stay light). */
-const PAPER = {
+export const PAPER = {
   colorScheme: 'light',
   '--text': '#1a1a1a', '--muted': '#666666', '--line': '#eaeaea', '--line-strong': '#d4d4d4',
   '--surface': '#ffffff', '--surface-2': '#f5f5f5', '--canvas': '#fafafa',
@@ -92,7 +92,7 @@ export function InvoicePage() {
             <PaymentPill status={o.paymentStatus} />
           </div>
           {o.paymentStatus !== 'paid' && <p className="text-[#666]">{o.paymentInstructions[lang]} {t('order.reference', { lng: lang })} {o.number}.</p>}
-          {o.payment && <p className="text-[#666]">{t('invoice.paidOn', { lng: lang, date: o.payment.receivedOn, amount: eur(o.payment.amountCents, lang), ref: o.payment.reference })}</p>}
+          {o.payments.map((p) => <p key={p.id} className="text-[#666]">{t('invoice.paidOn', { lng: lang, date: p.receivedOn, amount: eur(p.amountCents, lang), ref: p.reference })} {t('receipt.short', { lng: lang })} {p.receiptNumber}.</p>)}
         </section>
 
         <footer className="border-t border-[#eaeaea] pt-4 text-[11.5px] text-[#666]">

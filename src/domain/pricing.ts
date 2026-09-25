@@ -1,7 +1,9 @@
 // Business rules from the specification: MIN, ZONE, PRICE and VAT. Pure functions, unit-tested.
 import { roundHalfUp } from './money';
 import { dealWindow } from './romeTime';
-import type { City, Deal, PriceSource, Product, VatSummaryRow } from './types';
+import type { City, Deal, PriceSource, Product, QtyBands, VatSummaryRow } from './types';
+
+export type { QtyBands };
 
 /* ---------- MIN / ZONE: zone → city → global ---------- */
 
@@ -23,11 +25,47 @@ export function resolveShipping(city: City, zoneId: string | undefined): Resolve
   return { cents: city.shippingCents, from: 'city' };
 }
 
-/* ---------- PRICE: sale replaces tiers while a deal is live ---------- */
+/* ---------- Quantity bands (Settings › Pricing) ---------- */
 
-export function tierIndex(qty: number): 0 | 1 | 2 {
-  return qty >= 50 ? 2 : qty >= 10 ? 1 : 0;
+export const DEFAULT_BANDS: QtyBands = { starts: [3, 21, 41] };
+
+export const minQty = (b: QtyBands) => b.starts[0];
+
+/** Index of the band a quantity falls in (quantities below the minimum use the first band's price). */
+export function bandIndex(qty: number, b: QtyBands): number {
+  let i = 0;
+  b.starts.forEach((s, j) => {
+    if (qty >= s) i = j;
+  });
+  return i;
 }
+
+/** "3–20", "21–40", "41+" */
+export function bandLabels(b: QtyBands): string[] {
+  return b.starts.map((s, i) => (i === b.starts.length - 1 ? `${s}+` : `${s}–${b.starts[i + 1] - 1}`));
+}
+
+/** A product's price for band i. If a product has fewer prices than bands, the last price carries on. */
+export function bandPrice(product: Pick<Product, 'tiers'>, i: number): number {
+  return product.tiers[Math.min(i, product.tiers.length - 1)];
+}
+
+/** Makes a product's price list match the number of bands (extends with the last price, or trims). */
+export function fitTiers(tiers: number[], bands: number): number[] {
+  const out = tiers.slice(0, bands);
+  while (out.length < bands) out.push(out[out.length - 1]);
+  return out;
+}
+
+/** Bands must start at 1 or more and strictly increase. Returns an i18n error key or null. */
+export function validateBands(b: QtyBands): string | null {
+  if (b.starts.length < 2 || b.starts.length > 6) return 'bands_count';
+  if (!b.starts.every((s) => Number.isInteger(s) && s >= 1)) return 'bands_invalid';
+  if (b.starts.some((s, i) => i > 0 && s <= b.starts[i - 1])) return 'bands_order';
+  return null;
+}
+
+/* ---------- PRICE: sale replaces the bands while a deal is live ---------- */
 
 export function isDealLive(deal: Deal, now: Date): boolean {
   if (deal.cancelled) return false;
@@ -45,11 +83,11 @@ export interface UnitPrice {
   source: PriceSource;
 }
 
-/** PRICE-01: live deal → flat sale price at any quantity; otherwise the tier for the quantity. */
-export function unitPrice(product: Product, qty: number, deal: Deal | undefined): UnitPrice {
+/** PRICE-01: live deal → flat sale price at any quantity; otherwise the band for the quantity. */
+export function unitPrice(product: Product, qty: number, deal: Deal | undefined, bands: QtyBands): UnitPrice {
   if (deal) return { unitCents: deal.priceCents, source: `deal:${deal.id}` };
-  const t = tierIndex(qty);
-  return { unitCents: product.tiers[t], source: (['tier_1', 'tier_2', 'tier_3'] as const)[t] };
+  const i = bandIndex(qty, bands);
+  return { unitCents: bandPrice(product, i), source: `tier_${i + 1}` };
 }
 
 /**

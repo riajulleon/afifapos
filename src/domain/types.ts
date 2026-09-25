@@ -17,12 +17,20 @@ export interface Product {
   category: CategoryId;
   name: Localized;
   pack: Localized;
-  /** Case price per tier: [1–9, 10–49, 50+] cases. */
-  tiers: [number, number, number];
+  /** Case price for each quantity band in Settings › Pricing, lowest quantity first. */
+  tiers: number[];
   stock: number;
   vatRateId: string;
   icon: string;
   active: boolean;
+  description: Localized;
+  /** Product photo (data URL in the mock; a CDN URL in production). null = category icon. */
+  image: string | null;
+  /** Best-before date of the batch currently in stock, YYYY-MM-DD. */
+  expiryDate: string | null;
+  brand: string;
+  origin: string; // country of origin
+  ean: string; // barcode printed on the case
 }
 
 export interface Zone {
@@ -90,9 +98,31 @@ export interface User {
   reviewNote?: string;
 }
 
+/** All payments are manual (PAY). The kind picks the icon and what the reference field means. */
+export type PaymentKind = 'bank' | 'paypal' | 'stripe' | 'bkash' | 'other';
+export const PAYMENT_KINDS: PaymentKind[] = ['bank', 'paypal', 'stripe', 'bkash', 'other'];
+
+/** What the admin enters when money arrives. */
+export interface PaymentInput {
+  kind: PaymentKind;
+  receivedOn: string;
+  amountCents: number;
+  reference: string; // transaction / reference number
+  note: string;
+}
+
+/** A recorded payment. Each one has its own numbered receipt, visible to the admin and the buyer. */
+export interface PaymentRecord extends PaymentInput {
+  id: string;
+  receiptNumber: string; // RC-2026-000031, sequential per Rome year
+  recordedAt: string;
+  recordedBy: string;
+  emailedAt: string | null;
+}
+
 export interface PaymentMethod {
   id: string;
-  kind: 'bank' | 'paypal' | 'cod' | 'custom';
+  kind: PaymentKind;
   name: Localized;
   instructions: Localized;
   enabled: boolean;
@@ -100,9 +130,18 @@ export interface PaymentMethod {
   sort: number;
 }
 
-export type OrderStatus = 'received' | 'confirmed' | 'packed' | 'shipped' | 'delivered' | 'cancelled';
+/** Received → Confirmed → Shipped → Completed (key 'delivered'), or Cancelled. */
+export type OrderStatus = 'received' | 'confirmed' | 'shipped' | 'delivered' | 'cancelled';
 export type PaymentStatus = 'awaiting' | 'paid' | 'partial' | 'refunded';
-export type PriceSource = 'tier_1' | 'tier_2' | 'tier_3' | `deal:${string}`;
+export type PriceSource = `tier_${number}` | 'manual' | `deal:${string}`;
+
+/**
+ * Price bands by quantity, e.g. starts [3, 21, 41] = 3–20, 21–40, 41+ (Settings › Pricing).
+ * starts[0] is the minimum quantity per product line.
+ */
+export interface QtyBands {
+  starts: number[];
+}
 
 export interface OrderLine {
   productId: string;
@@ -141,7 +180,8 @@ export interface Order {
   paymentMethodName: Localized;
   paymentInstructions: Localized;
   paymentStatus: PaymentStatus;
-  payment?: { receivedOn: string; amountCents: number; reference: string; note: string };
+  payments: PaymentRecord[];
+  editedAt?: string;
   status: OrderStatus;
   history: { status: OrderStatus; at: string }[];
   placedAt: string;
@@ -169,8 +209,38 @@ export interface BusinessDetails {
   footer: Localized;
 }
 
+export interface FooterLink {
+  label: Localized;
+  /** /internal-path, https://…, mailto: or tel: */
+  href: string;
+}
+
+/** Global footer shown on the shop and the admin console (Settings › Footer). */
+export interface FooterSettings {
+  showOnShop: boolean;
+  showOnAdmin: boolean;
+  about: Localized;
+  email: string;
+  phone: string;
+  address: string;
+  hours: Localized;
+  links: FooterLink[];
+  /** Bottom line. {year} is replaced with the current year. */
+  copyright: Localized;
+}
+
+/** Background photo behind the Today's Sale banner (Admin › Today's Sale). */
+export interface SaleBanner {
+  image: string | null;
+  /** How visible the photo is behind the fade, 0.15–0.9. */
+  strength: number;
+}
+
 export interface Settings {
   globalMinOrderCents: number;
+  saleBanner: SaleBanner;
+  pricing: QtyBands;
+  footer: FooterSettings;
   branding: Branding;
   business: BusinessDetails;
   vatRates: VatRate[];

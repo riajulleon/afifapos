@@ -8,6 +8,7 @@ import { ApplyPage } from './pages/auth/ApplyPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { PendingPage } from './pages/auth/PendingPage';
 import { InvoicePage } from './pages/InvoicePage';
+import { ReceiptPage } from './pages/ReceiptPage';
 import { NotFoundPage } from './pages/NotFoundPage';
 import { AccountPage } from './pages/shop/AccountPage';
 import { CartPage } from './pages/shop/CartPage';
@@ -15,6 +16,7 @@ import { CatalogPage } from './pages/shop/CatalogPage';
 import { HomePage } from './pages/shop/HomePage';
 import { OrderPage } from './pages/shop/OrderPage';
 import { OrdersPage } from './pages/shop/OrdersPage';
+import { ProductPage } from './pages/shop/ProductPage';
 import { SalePage } from './pages/shop/SalePage';
 
 function Loading() {
@@ -38,6 +40,7 @@ const admin = {
   approvals: () => lazyNamed(() => import('./pages/admin/ApprovalsPage'), 'ApprovalsPage'),
   resellers: () => lazyNamed(() => import('./pages/admin/ResellersPage'), 'ResellersPage'),
   products: () => lazyNamed(() => import('./pages/admin/ProductsPage'), 'ProductsPage'),
+  product: () => lazyNamed(() => import('./pages/admin/ProductEditPage'), 'ProductEditPage'),
   deals: () => lazyNamed(() => import('./pages/admin/DealsPage'), 'DealsPage'),
   rules: () => lazyNamed(() => import('./pages/admin/RulesPage'), 'RulesPage'),
   settings: () => lazyNamed(() => import('./pages/admin/SettingsPage'), 'SettingsPage'),
@@ -99,6 +102,7 @@ const router = createBrowserRouter([
           { path: '/', element: <HomePage /> },
           { path: '/sale', element: <SalePage /> },
           { path: '/catalog', element: <CatalogPage /> },
+          { path: '/product/:id', element: <ProductPage /> },
           { path: '/cart', element: <CartPage /> },
           { path: '/orders', element: <OrdersPage /> },
           { path: '/orders/:id', element: <OrderPage /> },
@@ -106,6 +110,7 @@ const router = createBrowserRouter([
         ],
       },
       { path: '/invoice/:id', element: <InvoicePage /> },
+      { path: '/receipt/:orderId/:paymentId', element: <ReceiptPage /> },
     ],
   },
   {
@@ -121,6 +126,7 @@ const router = createBrowserRouter([
           { path: 'approvals', element: admin.approvals() },
           { path: 'resellers', element: admin.resellers() },
           { path: 'products', element: admin.products() },
+          { path: 'products/:id', element: admin.product() },
           { path: 'deals', element: admin.deals() },
           { path: 'rules', element: admin.rules() },
           { path: 'settings', element: admin.settings() },

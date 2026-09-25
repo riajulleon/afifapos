@@ -6,6 +6,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, useMe } from '../api/queries';
 import { Brand } from '../components/Brand';
+import { Footer } from '../components/Footer';
 import { Countdown, LangSwitch, ThemeToggle } from '../components/controls';
 import { discountPct, useSale } from '../lib/hooks';
 import { cartCount, useCart } from '../store/cart';
@@ -160,9 +161,13 @@ export function ShopLayout() {
         </div>
       </header>
 
-      <motion.main key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} className="mx-auto w-full max-w-[1280px] flex-1 px-4 pb-28 pt-6 sm:px-6 md:pb-16">
+      <motion.main key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} className="mx-auto w-full max-w-[1280px] flex-1 px-4 pb-12 pt-6 sm:px-6 md:pb-16">
         <Outlet />
       </motion.main>
+
+      <Footer variant="shop" />
+      {/* Keeps the footer clear of the fixed phone tab bar. */}
+      <div className="h-[calc(58px+env(safe-area-inset-bottom,0px))] md:hidden" aria-hidden />
 
       {/* Phone tab bar with Sale in the middle (spec §05). */}
       <nav className="no-print fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-line bg-surface pb-[env(safe-area-inset-bottom,0px)] md:hidden" aria-label="Tabs">

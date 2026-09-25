@@ -1,5 +1,5 @@
 // Sample data for the mock API. Everything here is example content, replaced by the real database in Phase 3.
-import { orderTotals, unitPrice } from '../domain/pricing';
+import { DEFAULT_BANDS, orderTotals, unitPrice } from '../domain/pricing';
 import { addDays, romeDateKey, romeWallTimeToUtc } from '../domain/romeTime';
 import type { AuditEntry, City, Deal, Order, OrderStatus, Product, Settings, User } from '../domain/types';
 
@@ -13,14 +13,48 @@ export interface Db {
   orders: Order[];
   audit: AuditEntry[];
   invoiceSeq: Record<string, number>; // per Rome year (INV-01)
+  receiptSeq: Record<string, number>; // per Rome year
   orderSeq: number;
 }
 
-export const DB_VERSION = 1;
+export const DB_VERSION = 4; // v4: product details (description, photo, best-before, brand, origin, EAN)
 
 const L = (en: string, it: string) => ({ en, it });
 
-export const seedProducts: Product[] = [
+type BaseProduct = Omit<Product, 'description' | 'image' | 'expiryDate' | 'brand' | 'origin' | 'ean'>;
+
+/** Sample details per product: description, brand, origin, EAN, and days until best-before from today. */
+const details: Record<string, { en: string; it: string; brand: string; origin: string; ean: string; bestBeforeDays: number }> = {
+  p1: { brand: 'Royal Harvest', origin: 'India', ean: '8901234500012', bestBeforeDays: 540,
+    en: 'Extra-long grain basmati aged 12 months. Cooks fluffy and separate; the best seller for restaurants and grocery shelves.',
+    it: 'Basmati a chicco extra lungo invecchiato 12 mesi. In cottura resta sgranato; il più richiesto da ristoranti e negozi.' },
+  p2: { brand: 'Colli Sabini', origin: 'Italia', ean: '8001234500029', bestBeforeDays: 420,
+    en: 'Cold-extracted extra virgin olive oil from Lazio olives. Fruity with a light peppery finish. Glass bottles, 12 per case.',
+    it: 'Olio extravergine estratto a freddo da olive del Lazio. Fruttato con leggero finale piccante. Bottiglie in vetro, 12 per cartone.' },
+  p3: { brand: 'Terra Viva', origin: 'Turkey', ean: '8691234500036', bestBeforeDays: 25,
+    en: 'Large dried chickpeas, ready after an overnight soak. Sold in 1 kg bags.',
+    it: 'Ceci secchi di calibro grande, pronti dopo una notte in ammollo. Sacchetti da 1 kg.' },
+  p4: { brand: 'Sole d’Oro', origin: 'Ukraine', ean: '4821234500043', bestBeforeDays: 300,
+    en: 'Refined sunflower oil for frying and baking. High smoke point, neutral taste. 5 L jerry cans.',
+    it: 'Olio di semi di girasole raffinato per frittura e forno. Alto punto di fumo, gusto neutro. Taniche da 5 L.' },
+  p5: { brand: 'Terra Viva', origin: 'Canada', ean: '0621234500050', bestBeforeDays: 380,
+    en: 'Split red lentils, no soaking needed. Cook in 15 minutes for dal and soups.',
+    it: 'Lenticchie rosse decorticate, senza ammollo. Cuociono in 15 minuti, ideali per dal e zuppe.' },
+  p6: { brand: 'Spice Route', origin: 'India', ean: '8901234500067', bestBeforeDays: 610,
+    en: 'Finely ground turmeric with high curcumin content. Resealable 400 g pouches.',
+    it: 'Curcuma macinata fine ad alto contenuto di curcumina. Buste richiudibili da 400 g.' },
+  p7: { brand: 'Molino Aurelio', origin: 'Italia', ean: '8001234500074', bestBeforeDays: 210,
+    en: 'Soft wheat flour type 00, W 260. Good for pizza, bread and fresh pasta.',
+    it: 'Farina di grano tenero tipo 00, W 260. Adatta a pizza, pane e pasta fresca.' },
+  p8: { brand: 'Campo Rosso', origin: 'Italia', ean: '8001234500081', bestBeforeDays: 900,
+    en: 'Whole peeled tomatoes in tomato juice, from Puglia. 400 g tins, 24 per case.',
+    it: 'Pomodori pelati interi in succo di pomodoro, dalla Puglia. Latte da 400 g, 24 per cartone.' },
+  p9: { brand: 'Tropica', origin: 'Pakistan', ean: '8961234500098', bestBeforeDays: 45,
+    en: 'Alphonso mango nectar, 35% fruit. Tetra Pak 1 L cartons, 12 per case.',
+    it: 'Nettare di mango Alphonso, 35% di frutta. Brick Tetra Pak da 1 L, 12 per cartone.' },
+};
+
+export const seedProducts: BaseProduct[] = [
   { id: 'p1', sku: 'RIC-BAS-5', category: 'grain', name: L('Basmati Rice Premium', 'Riso Basmati Premium'), pack: L('Case of 4 × 5 kg', 'Cartone 4 × 5 kg'), tiers: [3840, 3690, 3520], stock: 420, vatRateId: 'v10', icon: 'wheat', active: true },
   { id: 'p2', sku: 'OLI-EVO-1', category: 'oil', name: L('Extra Virgin Olive Oil', 'Olio Extravergine d’Oliva'), pack: L('Case of 12 × 1 L', 'Cartone 12 × 1 L'), tiers: [7190, 6850, 6500], stock: 160, vatRateId: 'v4', icon: 'droplet', active: true },
   { id: 'p3', sku: 'LEG-CEC-1', category: 'grain', name: L('Dried Chickpeas', 'Ceci secchi'), pack: L('Case of 10 × 1 kg', 'Cartone 10 × 1 kg'), tiers: [1780, 1690, 1590], stock: 18, vatRateId: 'v4', icon: 'bean', active: true },
@@ -51,6 +85,8 @@ export const seedCities: City[] = [
 
 export const seedSettings: Settings = {
   globalMinOrderCents: 80000,
+  pricing: { ...DEFAULT_BANDS },
+  saleBanner: { image: null, strength: 0.55 },
   branding: { brandName: 'Afifa Wholesale', siteTitle: 'Afifa Wholesale', logoLight: null, logoDark: null, senderName: 'Afifa Wholesale' },
   business: {
     legalName: 'Afifa Distribuzione S.r.l.',
@@ -72,10 +108,30 @@ export const seedSettings: Settings = {
       instructions: L('Pay to Afifa Distribuzione S.r.l., IBAN IT60 X054 2811 1010 0000 0123 456, BIC BPMOIT22. Quote your order number as the reference.', 'Intestato ad Afifa Distribuzione S.r.l., IBAN IT60 X054 2811 1010 0000 0123 456, BIC BPMOIT22. Indica il numero d’ordine nella causale.') },
     { id: 'paypal', kind: 'paypal', enabled: true, shipOnlyAfterPayment: true, sort: 1, name: L('PayPal', 'PayPal'),
       instructions: L('Send the total to pagamenti@afifa-wholesale.it and write your order number in the note.', 'Invia il totale a pagamenti@afifa-wholesale.it e scrivi il numero d’ordine nella nota.') },
-    { id: 'cod', kind: 'cod', enabled: false, shipOnlyAfterPayment: false, sort: 2, name: L('Cash on delivery', 'Contrassegno'),
+    { id: 'stripe', kind: 'stripe', enabled: true, shipOnlyAfterPayment: true, sort: 2, name: L('Card (Stripe payment link)', 'Carta (link di pagamento Stripe)'),
+      instructions: L('We email you a Stripe payment link for the total within 1 working hour. Pay by card from the link.', 'Ti inviamo via email un link di pagamento Stripe entro 1 ora lavorativa. Paga con carta dal link.') },
+    { id: 'bkash', kind: 'bkash', enabled: true, shipOnlyAfterPayment: true, sort: 3, name: L('bKash', 'bKash'),
+      instructions: L('Send the total to bKash merchant number 01700-000000 and write your order number as the reference.', 'Invia il totale al numero merchant bKash 01700-000000 e indica il numero d’ordine come riferimento.') },
+    { id: 'other', kind: 'other', enabled: false, shipOnlyAfterPayment: false, sort: 4, name: L('Cash on delivery', 'Contrassegno'),
       instructions: L('Pay the driver on delivery, in cash or by cheque.', 'Paga al corriere alla consegna, in contanti o con assegno.') },
   ],
   invoiceCopyToAdmin: null,
+  footer: {
+    showOnShop: true,
+    showOnAdmin: true,
+    about: L('Wholesale food and grocery distribution for approved resellers in Rome and across Italy.', 'Distribuzione all’ingrosso di alimentari per rivenditori approvati a Roma e in tutta Italia.'),
+    email: 'ordini@afifa-wholesale.it',
+    phone: '+39 06 1234 5678',
+    address: 'Via Prenestina 410, 00171 Roma RM',
+    hours: L('Mon–Sat 08:00–18:00', 'Lun–Sab 08:00–18:00'),
+    links: [
+      { label: L('Today’s Sale', 'Offerte di oggi'), href: '/sale' },
+      { label: L('Catalog', 'Catalogo'), href: '/catalog' },
+      { label: L('Privacy policy', 'Informativa privacy'), href: 'https://afifa-wholesale.it/privacy' },
+      { label: L('Terms of sale', 'Condizioni di vendita'), href: 'https://afifa-wholesale.it/terms' },
+    ],
+    copyright: L('© {year} Afifa Distribuzione S.r.l. · P.IVA IT01234567890 · All rights reserved.', '© {year} Afifa Distribuzione S.r.l. · P.IVA IT01234567890 · Tutti i diritti riservati.'),
+  },
 };
 
 const baseUser = { lang: 'en' as const, password: 'wholesale1', role: 'reseller' as const };
@@ -117,12 +173,12 @@ function seedDeals(today: string): Deal[] {
   ];
 }
 
-function buildOrder(db: Pick<Db, 'products' | 'cities' | 'settings'>, seq: number, invSeq: number, user: User, placedAt: Date, items: [string, number][], status: OrderStatus, paid: boolean): Order {
+function buildOrder(db: Pick<Db, 'products' | 'cities' | 'settings'>, seq: number, invSeq: number, rcSeq: () => number, user: User, placedAt: Date, items: [string, number][], status: OrderStatus, paid: boolean): Order {
   const city = db.cities.find((c) => c.id === user.cityId)!;
   const zone = city.zones.find((z) => z.id === user.zoneId);
   const lines = items.map(([pid, qty]) => {
     const p = db.products.find((x) => x.id === pid)!;
-    const price = unitPrice(p, qty, undefined);
+    const price = unitPrice(p, qty, undefined, db.settings.pricing);
     const vatPercent = db.settings.vatRates.find((v) => v.id === p.vatRateId)!.percent;
     return { productId: p.id, sku: p.sku, name: p.name, pack: p.pack, qty, unitCents: price.unitCents, source: price.source, vatPercent, lineCents: price.unitCents * qty };
   });
@@ -130,7 +186,7 @@ function buildOrder(db: Pick<Db, 'products' | 'cities' | 'settings'>, seq: numbe
   const t = orderTotals(lines.map((l) => ({ netCents: l.lineCents, vatPercent: l.vatPercent })), ship);
   const pm = db.settings.paymentMethods[seq % 2];
   const year = romeDateKey(placedAt).slice(0, 4);
-  const flow: OrderStatus[] = ['received', 'confirmed', 'packed', 'shipped', 'delivered'];
+  const flow: OrderStatus[] = ['received', 'confirmed', 'shipped', 'delivered'];
   const upto = flow.indexOf(status);
   return {
     id: `o${seq}`,
@@ -151,7 +207,12 @@ function buildOrder(db: Pick<Db, 'products' | 'cities' | 'settings'>, seq: numbe
     paymentMethodName: pm.name,
     paymentInstructions: pm.instructions,
     paymentStatus: paid ? 'paid' : 'awaiting',
-    payment: paid ? { receivedOn: romeDateKey(new Date(placedAt.getTime() + 86400000)), amountCents: t.totalCents, reference: `CRO ${1000 + seq}`, note: '' } : undefined,
+    payments: paid
+      ? [(() => {
+          const at = new Date(placedAt.getTime() + 86400000);
+          return { id: `pay${seq}`, receiptNumber: `RC-${romeDateKey(at).slice(0, 4)}-${String(rcSeq()).padStart(6, '0')}`, kind: pm.kind, receivedOn: romeDateKey(at), amountCents: t.totalCents, reference: pm.kind === 'bank' ? `CRO ${40000 + seq * 7}` : `8XY${seq}AB67890`, note: '', recordedAt: at.toISOString(), recordedBy: 'Giulia Russo', emailedAt: at.toISOString() };
+        })()]
+      : [],
     status,
     history: flow.slice(0, upto + 1).map((s, i) => ({ status: s, at: new Date(placedAt.getTime() + i * 5 * 3600000).toISOString() })),
     placedAt: placedAt.toISOString(),
@@ -163,13 +224,19 @@ function buildOrder(db: Pick<Db, 'products' | 'cities' | 'settings'>, seq: numbe
 
 export function createSeed(now = new Date()): Db {
   const today = romeDateKey(now);
-  const base = { products: structuredClone(seedProducts), cities: structuredClone(seedCities), settings: structuredClone(seedSettings) };
+  const products: Product[] = seedProducts.map((p) => {
+    const d = details[p.id];
+    return { ...p, description: { en: d.en, it: d.it }, image: null, expiryDate: addDays(today, d.bestBeforeDays), brand: d.brand, origin: d.origin, ean: d.ean };
+  });
+  const base = { products, cities: structuredClone(seedCities), settings: structuredClone(seedSettings) };
   const users = structuredClone(seedUsers).map((u, i) => (u.createdAt ? u : { ...u, createdAt: new Date(now.getTime() - (i - 5) * 7 * 3600000).toISOString() }));
   const buyers = users.filter((u) => u.role === 'reseller' && u.state === 'approved');
   const rnd = prng(42);
   const orders: Order[] = [];
   let seq = 1400;
   let inv = 0;
+  let rc = 0;
+  const nextRc = () => ++rc;
   const year = today.slice(0, 4);
   // ~12 weeks of history, growing slowly, for the dashboard chart.
   for (let day = 84; day >= 1; day--) {
@@ -182,13 +249,13 @@ export function createSeed(now = new Date()): Db {
       const pool = base.products.filter((p) => p.stock > 0);
       for (let j = 0; j < n; j++) {
         const p = pool[Math.floor(rnd() * pool.length)];
-        if (!items.some((it) => it[0] === p.id)) items.push([p.id, 2 + Math.floor(rnd() * (user.cityId === 'roma' ? 8 : 16))]);
+        if (!items.some((it) => it[0] === p.id)) items.push([p.id, 3 + Math.floor(rnd() * (user.cityId === 'roma' ? 10 : 30))]);
       }
       const age = day;
-      const status: OrderStatus = age > 4 ? 'delivered' : age > 2 ? 'shipped' : age > 1 ? 'packed' : 'confirmed';
+      const status: OrderStatus = age > 4 ? 'delivered' : age > 2 ? 'shipped' : 'confirmed';
       seq += 1;
       if (placedAt.toISOString().slice(0, 4) === year) inv += 1;
-      orders.push(buildOrder(base, seq, inv, user, placedAt, items, status, age > 3 || rnd() > 0.5));
+      orders.push(buildOrder(base, seq, inv, nextRc, user, placedAt, items, status, age > 3 || rnd() > 0.5));
     }
   }
   // Two fresh orders today so the admin has something new to act on.
@@ -196,7 +263,7 @@ export function createSeed(now = new Date()): Db {
     seq += 1;
     inv += 1;
     const u = users.find((x) => x.id === uid)!;
-    orders.push(buildOrder(base, seq, inv, u, new Date(now.getTime() - (seq % 3 + 1) * 1500000), items.map((x) => [x[0], x[1]] as [string, number]), 'received', false));
+    orders.push(buildOrder(base, seq, inv, nextRc, u, new Date(now.getTime() - (seq % 3 + 1) * 1500000), items.map((x) => [x[0], x[1]] as [string, number]), 'received', false));
   }
   orders.reverse();
   return {
@@ -210,6 +277,7 @@ export function createSeed(now = new Date()): Db {
       { id: 'a1', at: new Date(now.getTime() - 3600000 * 22).toISOString(), actor: 'Giulia Russo', action: 'Approved reseller Casa del Riso (Latina)' },
     ],
     invoiceSeq: { [year]: inv },
+    receiptSeq: { [year]: rc },
     orderSeq: seq,
   };
 }

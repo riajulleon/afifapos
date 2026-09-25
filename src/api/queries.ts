@@ -18,6 +18,7 @@ export const usePublicSettings = () => useQuery({ queryKey: ['public-settings'],
 export const useCities = () => useQuery({ queryKey: ['cities'], queryFn: api.cities });
 export const useProducts = () => useQuery({ queryKey: ['products'], queryFn: api.products });
 export const useDeals = (date?: string) => useQuery({ queryKey: ['deals', date ?? 'today'], queryFn: () => api.deals(date), refetchInterval: 60_000 });
+export const useTopSellers = () => useQuery({ queryKey: ['top-sellers'], queryFn: () => api.topSellers(30) });
 export const useBoughtToday = () => useQuery({ queryKey: ['bought-today'], queryFn: api.boughtToday });
 export const useMyOrders = () => useQuery({ queryKey: ['my-orders'], queryFn: api.myOrders });
 export const useOrder = (id: string) => useQuery({ queryKey: ['order', id], queryFn: () => api.order(id) });

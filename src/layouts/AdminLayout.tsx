@@ -7,6 +7,7 @@ import { Link, NavLink, Outlet, useLocation, useNavigate } from 'react-router';
 import { api, queryClient, useAdminOrders, useApplications, useMe } from '../api/queries';
 import { subscribe } from '../api/mockServer';
 import { Brand } from '../components/Brand';
+import { Footer } from '../components/Footer';
 import { LangSwitch, ThemeToggle } from '../components/controls';
 import { eur } from '../domain/money';
 import { formatRome } from '../domain/romeTime';
@@ -158,6 +159,7 @@ export function AdminLayout() {
         <motion.main key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6">
           <Outlet />
         </motion.main>
+        <Footer variant="admin" />
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { allocate, dealAllowance, isDealLive, orderTotals, resolveMinimum, resolveShipping, unitPrice } from './pricing';
+import { allocate, bandIndex, bandLabels, dealAllowance, fitTiers, isDealLive, orderTotals, resolveMinimum, resolveShipping, unitPrice, validateBands } from './pricing';
 import { romeDateKey, romeWallTimeToUtc } from './romeTime';
 import type { City, Deal, Product } from './types';
 
@@ -63,14 +63,17 @@ describe('sale vs tier (PRICE)', () => {
   const rice: Product = {
     id: 'p1', sku: 'RIC', category: 'grain', name: { en: 'Rice', it: 'Riso' }, pack: { en: '', it: '' },
     tiers: [3840, 3690, 3520], stock: 100, vatRateId: 'v10', icon: 'wheat', active: true,
+    description: { en: '', it: '' }, image: null, expiryDate: null, brand: '', origin: '', ean: '',
   };
   const deal: Deal = {
     id: 'd1', productId: 'p1', date: '2026-03-29', priceCents: 3072, perResellerLimit: 20,
     stockCap: null, sold: 0, featured: true, sort: 0, cancelled: false,
   };
   it('uses tiers without a deal and the flat sale price with one', () => {
-    expect(unitPrice(rice, 12, undefined)).toEqual({ unitCents: 3690, source: 'tier_2' });
-    expect(unitPrice(rice, 60, deal)).toEqual({ unitCents: 3072, source: 'deal:d1' });
+    const bands = { starts: [3, 21, 41] };
+    expect(unitPrice(rice, 12, undefined, bands)).toEqual({ unitCents: 3840, source: 'tier_1' });
+    expect(unitPrice(rice, 21, undefined, bands)).toEqual({ unitCents: 3690, source: 'tier_2' });
+    expect(unitPrice(rice, 60, deal, bands)).toEqual({ unitCents: 3072, source: 'deal:d1' });
   });
   it('is live 08:00–23:59:59 Rome time, including on the DST change day', () => {
     // 29 Mar 2026: clocks go forward in Italy, so 08:00 Rome = 06:00 UTC.
@@ -84,5 +87,23 @@ describe('sale vs tier (PRICE)', () => {
   it('limits cases per reseller per day and by stock cap', () => {
     expect(dealAllowance(deal, 15)).toBe(5);
     expect(dealAllowance({ ...deal, stockCap: 50, sold: 48 }, 0)).toBe(2);
+  });
+});
+
+describe('quantity bands (Settings › Pricing)', () => {
+  const b = { starts: [3, 21, 41] };
+  it('labels and finds the band for a quantity', () => {
+    expect(bandLabels(b)).toEqual(['3–20', '21–40', '41+']);
+    expect([3, 20, 21, 40, 41, 500].map((q) => bandIndex(q, b))).toEqual([0, 0, 1, 1, 2, 2]);
+  });
+  it('fits product prices to the number of bands', () => {
+    expect(fitTiers([100, 90], 4)).toEqual([100, 90, 90, 90]);
+    expect(fitTiers([100, 90, 80], 2)).toEqual([100, 90]);
+  });
+  it('rejects bands that do not increase', () => {
+    expect(validateBands({ starts: [3, 21, 41] })).toBeNull();
+    expect(validateBands({ starts: [3, 3, 41] })).toBe('bands_order');
+    expect(validateBands({ starts: [0, 10] })).toBe('bands_invalid');
+    expect(validateBands({ starts: [5] })).toBe('bands_count');
   });
 });

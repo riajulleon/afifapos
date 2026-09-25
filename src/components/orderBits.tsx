@@ -7,7 +7,7 @@ import type { Order, OrderStatus, PaymentStatus } from '../domain/types';
 import { useLang } from '../lib/hooks';
 import { Pill } from './ui';
 
-export const FLOW: OrderStatus[] = ['received', 'confirmed', 'packed', 'shipped', 'delivered'];
+export const FLOW: OrderStatus[] = ['received', 'confirmed', 'shipped', 'delivered'];
 
 export function StatusPill({ status }: { status: OrderStatus }) {
   const { t } = useTranslation();
@@ -21,15 +21,15 @@ export function PaymentPill({ status }: { status: PaymentStatus }) {
   return <Pill tone={tone}>{t(`pay.${status}`)}</Pill>;
 }
 
-/** Five-step tracking bar; the fill animates to the current step (spec §08). */
+/** Four-step tracking bar (Received, Confirmed, Shipped, Completed); the fill animates to the current step (spec §08). */
 export function TrackingBar({ order }: { order: Order }) {
   const { t } = useTranslation();
   const lang = useLang();
   const at = FLOW.indexOf(order.status);
   return (
-    <ol className="relative grid grid-cols-5">
-      <div className="absolute left-[10%] right-[10%] top-[13px] h-[3px] rounded bg-line" aria-hidden />
-      <motion.div className="absolute left-[10%] top-[13px] h-[3px] rounded bg-primary" initial={{ width: 0 }} animate={{ width: `${(Math.max(0, at) / 4) * 80}%` }} transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }} aria-hidden />
+    <ol className="relative grid grid-cols-4">
+      <div className="absolute left-[12.5%] right-[12.5%] top-[13px] h-[3px] rounded bg-line" aria-hidden />
+      <motion.div className="absolute left-[12.5%] top-[13px] h-[3px] rounded bg-primary" initial={{ width: 0 }} animate={{ width: `${(Math.max(0, at) / (FLOW.length - 1)) * 75}%` }} transition={{ duration: 1, ease: [0.16, 1, 0.3, 1] }} aria-hidden />
       {FLOW.map((s, i) => {
         const h = order.history.find((x) => x.status === s);
         const done = i < at || (i === at && s === 'delivered');

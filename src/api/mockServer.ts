@@ -1,12 +1,12 @@
 // In-browser stand-in for the Phase 3 API. Same function signatures the real HTTP client will expose;
 // state persists in localStorage and changes are broadcast to other tabs (admin alerts, live prices).
 import { eur } from '../domain/money';
-import { dealAllowance, isDealLive, liveDealFor, orderTotals, resolveMinimum, resolveShipping, unitPrice } from '../domain/pricing';
-import { romeDateKey } from '../domain/romeTime';
+import { DEFAULT_BANDS, dealAllowance, fitTiers, isDealLive, liveDealFor, minQty, orderTotals, resolveMinimum, resolveShipping, unitPrice, validateBands } from '../domain/pricing';
+import { addDays, romeDateKey } from '../domain/romeTime';
 import type {
-  AccountState, City, Deal, Lang, Order, OrderStatus, PaymentStatus, Product, Settings, UploadedDoc, User, Zone,
+  AccountState, City, Deal, Lang, Order, OrderLine, OrderStatus, PaymentInput, PaymentRecord, PaymentStatus, Product, Settings, UploadedDoc, User, Zone,
 } from '../domain/types';
-import { createSeed, DB_VERSION, type Db } from '../mock/seed';
+import { createSeed, DB_VERSION, seedSettings, type Db } from '../mock/seed';
 
 const DB_KEY = 'afifa-mockdb';
 const SESSION_KEY = 'afifa-session';
@@ -26,7 +26,12 @@ function load(): Db {
     const raw = localStorage.getItem(DB_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Db;
-      if (parsed.version === DB_VERSION) return parsed;
+      if (parsed.version === DB_VERSION) {
+        parsed.settings.footer ??= structuredClone(seedSettings.footer);
+        parsed.settings.pricing ??= { ...DEFAULT_BANDS };
+        parsed.settings.saleBanner ??= { image: null, strength: 0.55 };
+        return parsed;
+      }
     }
   } catch {
     /* storage blocked or corrupt: start fresh */
@@ -180,6 +185,9 @@ export interface PublicSettings {
   vatRates: Settings['vatRates'];
   paymentMethods: Settings['paymentMethods'];
   globalMinOrderCents: number;
+  footer: Settings['footer'];
+  pricing: Settings['pricing'];
+  saleBanner: Settings['saleBanner'];
 }
 
 export async function publicSettings(): Promise<PublicSettings> {
@@ -189,6 +197,9 @@ export async function publicSettings(): Promise<PublicSettings> {
     vatRates: s.vatRates,
     paymentMethods: s.paymentMethods.filter((m) => m.enabled).sort((a, b) => a.sort - b.sort),
     globalMinOrderCents: s.globalMinOrderCents,
+    footer: s.footer,
+    pricing: s.pricing,
+    saleBanner: s.saleBanner,
   });
 }
 
@@ -213,6 +224,26 @@ export async function deals(date?: string): Promise<Deal[]> {
   const day = date ?? romeDateKey();
   if (u.role === 'reseller' && day !== romeDateKey()) throw new ApiError('forbidden');
   return clone(db.deals.filter((d) => d.date === day && !d.cancelled).sort((a, b) => a.sort - b.sort));
+}
+
+/**
+ * Best sellers across all resellers: cases ordered in the last `days` Rome days, cancelled orders excluded.
+ * Resellers only get the ranking, not the volumes, since other resellers' sales are commercially sensitive.
+ */
+export async function topSellers(days = 30): Promise<{ productId: string; rank: number }[]> {
+  await latency();
+  requireApproved();
+  const since = addDays(romeDateKey(), -days);
+  const cases = new Map<string, number>();
+  for (const o of db.orders) {
+    if (o.status === 'cancelled' || o.romeDate <= since) continue;
+    for (const l of o.lines) cases.set(l.productId, (cases.get(l.productId) ?? 0) + l.qty);
+  }
+  const active = new Set(db.products.filter((p) => p.active).map((p) => p.id));
+  return [...cases.entries()]
+    .filter(([id]) => active.has(id))
+    .sort((a, b) => b[1] - a[1])
+    .map(([productId], i) => ({ productId, rank: i + 1 }));
 }
 
 /** Cases of each deal product this reseller already ordered today (PRICE-02). */
@@ -248,10 +279,11 @@ export async function placeOrder(input: { items: { productId: string; qty: numbe
   const lines = input.items.filter((i) => i.qty > 0).map((i) => {
     const p = db.products.find((x) => x.id === i.productId && x.active);
     if (!p) throw new ApiError('product_gone');
+    if (i.qty < minQty(db.settings.pricing)) throw new ApiError('below_moq', { name: p.name.en, n: minQty(db.settings.pricing) });
     if (i.qty > p.stock) throw new ApiError('stock', { name: p.name.en, left: p.stock });
     const deal = liveDealFor(p.id, db.deals, now);
     if (deal && i.qty > dealAllowance(deal, bought[p.id] ?? 0)) throw new ApiError('deal_limit', { name: p.name.en, left: dealAllowance(deal, bought[p.id] ?? 0) });
-    const price = unitPrice(p, i.qty, deal);
+    const price = unitPrice(p, i.qty, deal, db.settings.pricing);
     const vatPercent = db.settings.vatRates.find((v) => v.id === p.vatRateId)?.percent ?? 22;
     return { productId: p.id, sku: p.sku, name: p.name, pack: p.pack, qty: i.qty, unitCents: price.unitCents, source: price.source, vatPercent, lineCents: price.unitCents * i.qty, deal };
   });
@@ -289,6 +321,7 @@ export async function placeOrder(input: { items: { productId: string; qty: numbe
     paymentMethodName: pm.name,
     paymentInstructions: pm.instructions,
     paymentStatus: 'awaiting',
+    payments: [],
     status: 'received',
     history: [{ status: 'received', at: now.toISOString() }],
     placedAt: now.toISOString(),
@@ -330,7 +363,7 @@ export async function adminOrders(): Promise<Order[]> {
   return clone(db.orders);
 }
 
-const FLOW: OrderStatus[] = ['received', 'confirmed', 'packed', 'shipped', 'delivered'];
+const FLOW: OrderStatus[] = ['received', 'confirmed', 'shipped', 'delivered'];
 
 export async function setOrderStatus(id: string, status: OrderStatus) {
   await latency();
@@ -346,16 +379,98 @@ export async function setOrderStatus(id: string, status: OrderStatus) {
   commit();
 }
 
-export async function markPaid(id: string, p: { receivedOn: string; amountCents: number; reference: string; note: string }) {
+const paidSoFar = (o: Order) => o.payments.reduce((a, p) => a + p.amountCents, 0);
+const statusFor = (o: Order): PaymentStatus => { const paid = paidSoFar(o); return paid === 0 ? 'awaiting' : paid >= o.totalCents ? 'paid' : 'partial'; };
+
+/** Records money received and issues the next receipt number (emailed to the buyer in Phase 3). */
+export async function markPaid(id: string, p: PaymentInput): Promise<PaymentRecord> {
   await latency();
   const admin = requireAdmin();
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
-  const status: PaymentStatus = p.amountCents >= o.totalCents ? 'paid' : 'partial';
-  o.payment = p;
+  if (!p.reference.trim()) throw new ApiError('reference_required');
+  if (!(p.amountCents > 0)) throw new ApiError('amount_required');
+  const year = p.receivedOn.slice(0, 4);
+  db.receiptSeq[year] = (db.receiptSeq[year] ?? 0) + 1;
+  const now = new Date().toISOString();
+  const record: PaymentRecord = { ...p, id: uid('pay'), receiptNumber: `RC-${year}-${String(db.receiptSeq[year]).padStart(6, '0')}`, recordedAt: now, recordedBy: admin.fullName, emailedAt: now };
+  o.payments.push(record);
+  const status = statusFor(o);
   o.paymentStatus = status;
-  audit(admin, `Order ${o.number} payment ${status}: ${eur(p.amountCents)} (${p.reference || 'no reference'})`);
+  audit(admin, `Order ${o.number} payment ${status}: ${eur(p.amountCents)} via ${p.kind}, ref ${p.reference}, receipt ${record.receiptNumber}`);
   commit();
+  return clone(record);
+}
+
+export interface OrderEdit {
+  lines: { productId: string; qty: number; unitCents: number }[];
+  shippingCents: number;
+  paymentMethodId: string;
+}
+
+/** Admin edit before shipping: lines, prices, shipping fee, payment method. Re-totals VAT and restocks the difference. */
+export async function editOrder(id: string, edit: OrderEdit): Promise<Order> {
+  await latency();
+  const admin = requireAdmin();
+  const o = db.orders.find((x) => x.id === id);
+  if (!o) throw new ApiError('not_found');
+  if (o.status !== 'received' && o.status !== 'confirmed') throw new ApiError('not_editable');
+  if (!edit.lines.length) throw new ApiError('empty');
+  if (edit.shippingCents < 0) throw new ApiError('generic');
+  const pm = db.settings.paymentMethods.find((m) => m.id === edit.paymentMethodId);
+  if (!pm) throw new ApiError('payment_method');
+
+  const oldQty = new Map(o.lines.map((l) => [l.productId, l]));
+  const newIds = new Set(edit.lines.map((l) => l.productId));
+  // Stock check first, so a failed edit changes nothing.
+  for (const l of edit.lines) {
+    const p = db.products.find((x) => x.id === l.productId);
+    if (!p) throw new ApiError('product_gone');
+    if (!Number.isInteger(l.qty) || l.qty < 1 || l.unitCents < 0) throw new ApiError('generic');
+    const extra = l.qty - (oldQty.get(l.productId)?.qty ?? 0);
+    if (extra > p.stock) throw new ApiError('stock', { name: p.name.en, left: p.stock + (oldQty.get(l.productId)?.qty ?? 0) });
+  }
+  const changes: string[] = [];
+  const lines: OrderLine[] = edit.lines.map((l) => {
+    const p = db.products.find((x) => x.id === l.productId)!;
+    const before = oldQty.get(l.productId);
+    const diff = l.qty - (before?.qty ?? 0);
+    p.stock -= diff;
+    if (before?.source.startsWith('deal:')) {
+      const d = db.deals.find((x) => `deal:${x.id}` === before.source);
+      if (d) d.sold = Math.max(0, d.sold + diff);
+    }
+    if (!before) changes.push(`added ${l.qty}× ${p.name.en}`);
+    else {
+      if (diff) changes.push(`${p.name.en} ${before.qty} → ${l.qty}`);
+      if (before.unitCents !== l.unitCents) changes.push(`${p.name.en} price ${eur(before.unitCents)} → ${eur(l.unitCents)}`);
+    }
+    const tier = unitPrice(p, l.qty, undefined, db.settings.pricing);
+    const source = before && before.unitCents === l.unitCents ? before.source : tier.unitCents === l.unitCents ? tier.source : 'manual';
+    const vatPercent = before?.vatPercent ?? db.settings.vatRates.find((v) => v.id === p.vatRateId)?.percent ?? 22;
+    return { productId: p.id, sku: p.sku, name: p.name, pack: p.pack, qty: l.qty, unitCents: l.unitCents, source, vatPercent, lineCents: l.unitCents * l.qty };
+  });
+  for (const before of o.lines) {
+    if (newIds.has(before.productId)) continue;
+    const p = db.products.find((x) => x.id === before.productId);
+    if (p) p.stock += before.qty;
+    const d = before.source.startsWith('deal:') ? db.deals.find((x) => `deal:${x.id}` === before.source) : undefined;
+    if (d) d.sold = Math.max(0, d.sold - before.qty);
+    changes.push(`removed ${before.name.en}`);
+  }
+  if (edit.shippingCents !== o.shippingCents) changes.push(`shipping ${eur(o.shippingCents)} → ${eur(edit.shippingCents)}`);
+  if (pm.id !== o.paymentMethodId) changes.push(`payment method → ${pm.name.en}`);
+
+  const t = orderTotals(lines.map((l) => ({ netCents: l.lineCents, vatPercent: l.vatPercent })), edit.shippingCents);
+  Object.assign(o, {
+    lines, subtotalCents: t.subtotalCents, shippingCents: t.shippingCents, vat: t.vat, totalCents: t.totalCents,
+    paymentMethodId: pm.id, paymentMethodName: pm.name, paymentInstructions: pm.instructions,
+    editedAt: new Date().toISOString(), emailSentAt: new Date().toISOString(),
+  });
+  o.paymentStatus = statusFor(o);
+  audit(admin, `Edited order ${o.number}: ${changes.join('; ') || 'no changes'} · new total ${eur(o.totalCents)}`);
+  commit();
+  return clone(o);
 }
 
 export async function resendInvoice(id: string) {
@@ -399,6 +514,12 @@ export async function adminSettings(): Promise<Settings> {
 export async function updateSettings(patch: Partial<Settings>, what: string) {
   await latency();
   const admin = requireAdmin();
+  if (patch.pricing) {
+    const bad = validateBands(patch.pricing);
+    if (bad) throw new ApiError(bad);
+    const n = patch.pricing.starts.length;
+    db.products.forEach((p) => { p.tiers = fitTiers(p.tiers, n); });
+  }
   db.settings = { ...db.settings, ...clone(patch) };
   audit(admin, what);
   commit();
@@ -428,6 +549,10 @@ export async function updateProduct(id: string, patch: Partial<Product>, what: s
   const admin = requireAdmin();
   const p = db.products.find((x) => x.id === id);
   if (!p) throw new ApiError('not_found');
+  const next = { ...p, ...patch };
+  if (!next.name.en.trim() || !next.name.it.trim() || !next.sku.trim()) throw new ApiError('product_invalid');
+  if (next.tiers.length !== db.settings.pricing.starts.length || next.tiers.some((c) => !(c > 0)) || next.stock < 0 || !Number.isInteger(next.stock)) throw new ApiError('product_invalid');
+  if (db.products.some((x) => x.id !== id && x.sku.toLowerCase() === next.sku.trim().toLowerCase())) throw new ApiError('sku_taken');
   Object.assign(p, clone(patch));
   audit(admin, what);
   commit();
@@ -445,6 +570,7 @@ export async function saveDeal(deal: Deal) {
   const p = db.products.find((x) => x.id === deal.productId);
   if (!p) throw new ApiError('not_found');
   if (deal.priceCents >= p.tiers[0]) throw new ApiError('deal_price_high'); // DEAL-03
+  if (deal.perResellerLimit < minQty(db.settings.pricing)) throw new ApiError('deal_limit_moq', { n: minQty(db.settings.pricing) });
   if (db.deals.some((d) => d.id !== deal.id && d.productId === deal.productId && d.date === deal.date && !d.cancelled)) throw new ApiError('deal_duplicate'); // DEAL-02
   if (deal.featured) db.deals.forEach((d) => { if (d.date === deal.date && d.id !== deal.id) d.featured = false; });
   const i = db.deals.findIndex((d) => d.id === deal.id);

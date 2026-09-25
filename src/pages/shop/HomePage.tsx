@@ -1,11 +1,16 @@
-import { ArrowRight, Flame, RotateCcw } from 'lucide-react';
+import clsx from 'clsx';
+import { ArrowRight, Flame, RotateCcw, TrendingUp } from 'lucide-react';
+import { useState } from 'react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import { useMe, useMyOrders } from '../../api/queries';
+import { useMe, useMyOrders, useProducts, useTopSellers } from '../../api/queries';
+import { ProductCard } from '../../components/cards';
+import { SaleBackdrop } from '../../components/SaleBackdrop';
 import { Countdown } from '../../components/controls';
 import { categories, categoryIcon, ProductIcon } from '../../components/ProductIcon';
-import { OffBadge, Skeleton } from '../../components/ui';
+import { EmptyState, OffBadge, Skeleton } from '../../components/ui';
+import type { CategoryId } from '../../domain/types';
 import { eur } from '../../domain/money';
 import { formatRome } from '../../domain/romeTime';
 import { discountPct, useDocumentTitle, useLang, useSale } from '../../lib/hooks';
@@ -29,7 +34,8 @@ export function HomePage() {
       <p className="text-muted">{t('home.hello', { name: me.data?.fullName.split(' ')[0] ?? '' })}</p>
 
       {/* Today's Sale hero: the one black block on the page (spec §05). */}
-      <section className="inv grid gap-8 overflow-hidden rounded-2xl p-6 sm:p-8 lg:grid-cols-[1.05fr_1fr] lg:items-center" aria-labelledby="sale-hero">
+      <section className="inv relative isolate grid gap-8 overflow-hidden rounded-2xl p-6 sm:p-8 lg:grid-cols-[1.05fr_1fr] lg:items-center" aria-labelledby="sale-hero">
+        <SaleBackdrop />
         <div className="grid content-start gap-4">
           <span className="flex items-center gap-2 text-xs font-medium uppercase tracking-[.1em] text-muted">
             <Flame className="size-4" />
@@ -91,6 +97,8 @@ export function HomePage() {
         </div>
       </section>
 
+      <TopSellers byProduct={sale.byProduct} />
+
       {last && (
         <section className="grid gap-3" aria-labelledby="again">
           <h2 id="again" className="text-lg font-medium">{t('home.again')}</h2>
@@ -115,5 +123,47 @@ export function HomePage() {
         </section>
       )}
     </div>
+  );
+}
+
+/** Top sellers across all categories, ranked by cases ordered in the last 30 days. Filter by category with the chips. */
+function TopSellers({ byProduct }: { byProduct: ReturnType<typeof useSale>['byProduct'] }) {
+  const { t } = useTranslation();
+  const top = useTopSellers();
+  const products = useProducts();
+  const [cat, setCat] = useState<CategoryId | 'all'>('all');
+  const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
+  const ranked = (top.data ?? []).map((r) => ({ ...r, product: byId.get(r.productId) })).filter((r) => r.product);
+  const cats = categories.filter((c) => ranked.some((r) => r.product!.category === c));
+  const list = ranked.filter((r) => cat === 'all' || r.product!.category === cat).slice(0, 8);
+
+  return (
+    <section className="grid gap-3" aria-labelledby="top-sellers">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 id="top-sellers" className="flex items-center gap-2 text-lg font-medium"><TrendingUp className="size-5" /> {t('home.top')}</h2>
+          <p className="text-sm text-muted">{t('home.topSub')}</p>
+        </div>
+        <Link to="/catalog" className="text-sm font-medium underline underline-offset-4">{t('home.all')}</Link>
+      </div>
+      {cats.length > 1 && (
+        <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('catalog.category')}>
+          {(['all', ...cats] as const).map((c) => (
+            <button key={c} type="button" aria-pressed={cat === c} onClick={() => setCat(c)} className={clsx('h-8 rounded-full border px-3.5 text-[13px] transition-colors', cat === c ? 'border-primary bg-primary text-primary-ink' : 'border-line-strong bg-surface hover:bg-surface-2')}>
+              {c === 'all' ? t('catalog.all') : t(`cat.${c}`)}
+            </button>
+          ))}
+        </div>
+      )}
+      {top.isLoading || products.isLoading ? (
+        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">{[0, 1, 2, 3].map((i) => <Skeleton key={i} className="h-80" />)}</div>
+      ) : list.length ? (
+        <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-4">
+          {list.map((r, i) => <ProductCard key={`${cat}-${r.productId}`} product={r.product!} deal={byProduct.get(r.productId)} index={i} rank={r.rank} />)}
+        </div>
+      ) : (
+        <EmptyState icon={<TrendingUp className="size-5" />} title={t('home.topEmpty')} />
+      )}
+    </section>
   );
 }

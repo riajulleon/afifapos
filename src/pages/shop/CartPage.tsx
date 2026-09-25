@@ -1,5 +1,6 @@
 import clsx from 'clsx';
-import { AlertCircle, Check, Landmark, MapPin, ShoppingCart, Trash2, Wallet } from 'lucide-react';
+import { AlertCircle, Check, MapPin, ShoppingCart, Trash2 } from 'lucide-react';
+import { PaymentIcon } from '../../components/PaymentIcon';
 import { motion, useAnimationControls } from 'motion/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +12,7 @@ import { ProductIcon } from '../../components/ProductIcon';
 import { Button, EmptyState, ErrorNote, OffBadge, PageHeader, Skeleton } from '../../components/ui';
 import { eur } from '../../domain/money';
 import { orderTotals, resolveMinimum, resolveShipping, unitPrice } from '../../domain/pricing';
-import { discountPct, useAllowanceLeft, useDocumentTitle, useLang, useSale } from '../../lib/hooks';
+import { discountPct, useAllowanceLeft, useBands, useDocumentTitle, useLang, useSale } from '../../lib/hooks';
 import { useCart } from '../../store/cart';
 
 export function CartPage() {
@@ -28,6 +29,7 @@ export function CartPage() {
   const settings = usePublicSettings();
   const sale = useSale(5000);
   const allowance = useAllowanceLeft();
+  const { bands, min: minCases } = useBands();
   const [methodId, setMethodId] = useState<string | null>(null);
   const place = useApi(api.placeOrder);
   const shake = useAnimationControls();
@@ -48,9 +50,9 @@ export function CartPage() {
       const p = productById.get(id);
       if (!p) return null;
       const deal = sale.byProduct.get(id);
-      const price = unitPrice(p, qty, deal);
+      const price = unitPrice(p, qty, deal, bands);
       const maxQty = deal ? allowance(deal) : p.stock;
-      return { p, qty, deal, ...price, lineCents: price.unitCents * qty, vatPercent: vatOf(p.vatRateId), maxQty, over: qty > maxQty };
+      return { p, qty, deal, ...price, lineCents: price.unitCents * qty, vatPercent: vatOf(p.vatRateId), maxQty, over: qty > maxQty, under: qty < minCases };
     })
     .filter((l): l is NonNullable<typeof l> => l !== null);
 
@@ -63,7 +65,7 @@ export function CartPage() {
   const pct = min.cents ? Math.min(100, (totals.subtotalCents / min.cents) * 100) : 100;
   const methods = settings.data?.paymentMethods ?? [];
   const method = methods.find((m) => m.id === methodId) ?? methods[0];
-  const blocked = !reached || lines.some((l) => l.over) || !method;
+  const blocked = !reached || lines.some((l) => l.over || l.under) || !method;
 
   if (!lines.length) {
     return (
@@ -103,6 +105,11 @@ export function CartPage() {
                 <p className="text-[13px] text-muted">
                   {l.p.pack[lang]} · <span className="num">{eur(l.unitCents, lang)}</span> / {t('common.case')} · {t('cart.vatRate', { p: l.vatPercent })}
                 </p>
+                {l.under && (
+                  <p className="mt-1 flex items-center gap-1.5 text-[12.5px] text-bad">
+                    <AlertCircle className="size-3.5" /> {t('cart.underMin', { n: minCases })}
+                  </p>
+                )}
                 {l.over && (
                   <p className="mt-1 flex items-center gap-1.5 text-[12.5px] text-bad">
                     <AlertCircle className="size-3.5" /> {l.deal ? t('cart.overDeal', { n: l.maxQty }) : t('cart.overStock', { n: l.maxQty })}
@@ -110,7 +117,7 @@ export function CartPage() {
                 )}
               </div>
               <div className="col-span-2 flex items-center justify-between gap-3 sm:col-span-1 sm:contents">
-                <QtyStepper value={l.qty} min={1} max={Math.max(l.qty, l.maxQty)} onChange={(v) => setQty(l.p.id, v)} label={t('catalog.qty')} />
+                <QtyStepper value={l.qty} min={Math.min(minCases, l.qty)} max={Math.max(l.qty, l.maxQty)} onChange={(v) => setQty(l.p.id, v)} label={t('catalog.qty')} />
                 <b className="num min-w-24 text-right font-medium">{eur(l.lineCents, lang)}</b>
                 <button type="button" onClick={() => setQty(l.p.id, 0)} className="grid size-8 place-items-center rounded-lg text-muted transition-colors hover:bg-surface-2 hover:text-bad" aria-label={t('common.remove')}>
                   <Trash2 className="size-4" />
@@ -163,13 +170,12 @@ export function CartPage() {
             <legend className="mb-1.5 text-[13px] font-medium text-muted">{t('cart.payWith')}</legend>
             {methods.map((m) => {
               const on = method?.id === m.id;
-              const Icon = m.kind === 'bank' ? Landmark : Wallet;
               return (
                 <label key={m.id} className={clsx('flex cursor-pointer items-start gap-3 rounded-xl border p-3 transition-colors', on ? 'border-fg bg-canvas' : 'border-line hover:border-line-strong')}>
                   <input type="radio" name="pay" className="mt-1 accent-[var(--primary)]" checked={on} onChange={() => setMethodId(m.id)} />
                   <span className="grid gap-0.5">
                     <span className="flex items-center gap-2 text-sm font-medium">
-                      <Icon className="size-4" /> {m.name[lang]}
+                      <PaymentIcon kind={m.kind} className="size-4" /> {m.name[lang]}
                     </span>
                     {on && <span className="text-[12.5px] leading-relaxed text-muted">{m.instructions[lang]}</span>}
                   </span>

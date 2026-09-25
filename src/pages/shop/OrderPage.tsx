@@ -1,4 +1,4 @@
-import { ArrowLeft, FileText, Mail, RotateCcw } from 'lucide-react';
+import { ArrowLeft, FileText, Mail, Receipt, RotateCcw } from 'lucide-react';
 import { motion } from 'motion/react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams, useSearchParams } from 'react-router';
@@ -110,6 +110,16 @@ export function OrderPage() {
             </div>
             {o.paymentStatus !== 'paid' && <p className="leading-relaxed text-muted">{o.paymentInstructions[lang]}</p>}
             {o.paymentStatus !== 'paid' && <p className="text-[13px]">{t('order.reference')} <b className="num font-medium">{o.number}</b></p>}
+            {o.payments.length > 0 && (
+              <ul className="grid gap-1.5 border-t border-line pt-2.5">
+                {o.payments.map((p) => (
+                  <li key={p.id} className="flex flex-wrap items-center justify-between gap-2 text-[13px]">
+                    <span><b className="num font-medium">{eur(p.amountCents, lang)}</b> <span className="text-muted">· {t(`admin.pay.kind.${p.kind}`)} · {p.receivedOn}</span></span>
+                    <Link to={`/receipt/${o.id}/${p.id}`} className="inline-flex items-center gap-1 font-medium underline underline-offset-4"><Receipt className="size-3.5" /> {t('receipt.short')} {p.receiptNumber}</Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </div>
           <div className="flex flex-wrap gap-2">
             <Link to={`/invoice/${o.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-ink hover:bg-primary-hover">

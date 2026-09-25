@@ -13,6 +13,7 @@ import type { Deal } from '../../domain/types';
 import { discountPct, useDocumentTitle, useLang } from '../../lib/hooks';
 import { useNow } from '../../lib/useNow';
 import { toast } from '../../store/toasts';
+import { SaleBannerCard } from './SaleBannerCard';
 
 interface Draft { id: string; productId: string; price: string; limit: string; cap: string; featured: boolean; sort: number }
 
@@ -95,7 +96,7 @@ export function DealsPage() {
               <Field label={t('admin.deal.limit')} htmlFor="d-limit"><Input id="d-limit" inputMode="numeric" value={draft.limit} onChange={(e) => setDraft({ ...draft, limit: e.target.value.replace(/\D/g, '') })} className="!h-9" /></Field>
               <Field label={t('admin.deal.cap')} htmlFor="d-cap" hint={t('admin.deal.capHint')}><Input id="d-cap" inputMode="numeric" value={draft.cap} onChange={(e) => setDraft({ ...draft, cap: e.target.value.replace(/\D/g, '') })} className="!h-9" /></Field>
             </div>
-            {dp && dPrice !== null && dPrice < dp.tiers[0] && dPrice < dp.tiers[2] && <p className="text-[13px] text-warn">{t('admin.deal.belowTier3', { price: eur(dp.tiers[2], lang) })}</p>}
+            {dp && dPrice !== null && dPrice < dp.tiers[0] && dPrice < dp.tiers[dp.tiers.length - 1] && <p className="text-[13px] text-warn">{t('admin.deal.belowTier3', { price: eur(dp.tiers[dp.tiers.length - 1], lang) })}</p>}
             <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={draft.featured} onChange={(e) => setDraft({ ...draft, featured: e.target.checked })} className="size-4 accent-[var(--primary)]" /> {t('admin.deal.featured')}</label>
             <div className="flex gap-2"><Button type="submit" loading={save.isPending}>{t('common.save')}</Button><Button type="button" variant="quiet" onClick={() => setDraft(null)}>{t('common.cancel')}</Button></div>
           </form>
@@ -146,6 +147,8 @@ export function DealsPage() {
           </table>
         </div>
       )}
+
+      <SaleBannerCard />
     </div>
   );
 }

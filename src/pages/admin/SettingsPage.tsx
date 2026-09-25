@@ -6,11 +6,15 @@ import { useSearchParams } from 'react-router';
 import { api, useAdminSettings, useApi } from '../../api/queries';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Pill, Skeleton } from '../../components/ui';
-import type { Branding, BusinessDetails, PaymentMethod, Settings, VatRate } from '../../domain/types';
+import { PAYMENT_KINDS, type Branding, type BusinessDetails, type PaymentKind, type PaymentMethod, type Settings, type VatRate } from '../../domain/types';
+import { PaymentIcon } from '../../components/PaymentIcon';
+import { Select } from '../../components/ui';
 import { useDocumentTitle, useLang } from '../../lib/hooks';
 import { toast } from '../../store/toasts';
+import { FooterSettingsTab } from './FooterSettingsTab';
+import { PricingSettingsTab } from './PricingSettingsTab';
 
-type Tab = 'appearance' | 'payments' | 'tax' | 'business' | 'demo';
+type Tab = 'appearance' | 'footer' | 'pricing' | 'payments' | 'tax' | 'business' | 'demo';
 
 function useSaver() {
   const { t } = useTranslation();
@@ -102,7 +106,10 @@ function Payments({ s }: { s: Settings }) {
       {methods.map((m, i) => (
         <Card key={m.id} className={clsx('grid gap-4 p-5', !m.enabled && 'opacity-70')}>
           <div className="flex flex-wrap items-center gap-3">
-            <b className="flex-1 font-medium">{m.name[lang] || t('admin.settings.newMethod')}</b>
+            <b className="flex flex-1 items-center gap-2 font-medium"><PaymentIcon kind={m.kind} className="size-4" /> {m.name[lang] || t('admin.settings.newMethod')}</b>
+            <Select value={m.kind} onChange={(e) => upd(i, { kind: e.target.value as PaymentKind })} className="!h-8 w-36 text-[13px]" aria-label={t('admin.pay.method')}>
+              {PAYMENT_KINDS.map((k) => <option key={k} value={k}>{t(`admin.pay.kind.${k}`)}</option>)}
+            </Select>
             <Pill tone={m.enabled ? 'ok' : 'muted'}>{m.enabled ? t('admin.settings.on') : t('admin.settings.off')}</Pill>
             <Button size="sm" variant="quiet" disabled={i === 0} onClick={() => move(i, -1)} aria-label={t('admin.settings.moveUp')}><ArrowUp className="size-4" /></Button>
             <Button size="sm" variant="quiet" disabled={i === methods.length - 1} onClick={() => move(i, 1)} aria-label={t('admin.settings.moveDown')}><ArrowDown className="size-4" /></Button>
@@ -124,7 +131,7 @@ function Payments({ s }: { s: Settings }) {
       ))}
       {!!error && <ErrorNote><ApiErrorMessage error={error} /></ErrorNote>}
       <div className="flex flex-wrap gap-2">
-        <Button variant="ghost" onClick={() => setMethods([...methods, { id: `pm${Date.now().toString(36)}`, kind: 'custom', name: { en: '', it: '' }, instructions: { en: '', it: '' }, enabled: false, shipOnlyAfterPayment: true, sort: methods.length }])}><Plus className="size-4" /> {t('admin.settings.addMethod')}</Button>
+        <Button variant="ghost" onClick={() => setMethods([...methods, { id: `pm${Date.now().toString(36)}`, kind: 'other', name: { en: '', it: '' }, instructions: { en: '', it: '' }, enabled: false, shipOnlyAfterPayment: true, sort: methods.length }])}><Plus className="size-4" /> {t('admin.settings.addMethod')}</Button>
         <Button disabled={!valid} loading={pending} onClick={() => save({ paymentMethods: methods.map((m, i) => ({ ...m, sort: i })) }, `Payment methods: ${methods.filter((m) => m.enabled).map((m) => m.name.en).join(', ')} enabled`)}>{t('common.save')}</Button>
       </div>
       {!methods.some((m) => m.enabled) && <p className="text-[13px] text-bad">{t('admin.settings.needOneMethod')}</p>}
@@ -226,7 +233,7 @@ export function SettingsPage() {
   const settings = useAdminSettings();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') ?? 'appearance') as Tab;
-  const tabs: Tab[] = ['appearance', 'payments', 'tax', 'business', 'demo'];
+  const tabs: Tab[] = ['appearance', 'footer', 'pricing', 'payments', 'tax', 'business', 'demo'];
   if (settings.isLoading) return <Skeleton className="h-96" />;
   const s = settings.data!;
   const key = JSON.stringify(s);
@@ -241,6 +248,8 @@ export function SettingsPage() {
         ))}
       </div>
       {tab === 'appearance' && <Appearance key={key} s={s} />}
+      {tab === 'footer' && <FooterSettingsTab key={key} s={s} />}
+      {tab === 'pricing' && <PricingSettingsTab key={key} s={s} />}
       {tab === 'payments' && <Payments key={key} s={s} />}
       {tab === 'tax' && <Tax key={key} s={s} />}
       {tab === 'business' && <Business key={key} s={s} />}
