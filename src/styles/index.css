@@ -1,0 +1,104 @@
+@import "tailwindcss";
+
+/* `dark:` follows the data-theme attribute set by the theme button (spec §02). */
+@custom-variant dark (&:where([data-theme=dark], [data-theme=dark] *));
+
+:root {
+  color-scheme: light;
+  --bg: #ffffff; --canvas: #fafafa; --surface: #ffffff; --surface-2: #f5f5f5;
+  --line: #eaeaea; --line-strong: #d4d4d4; --text: #1a1a1a; --muted: #666666;
+  --primary: #1a1a1a; --primary-ink: #ffffff; --primary-hover: #383838; --primary-soft: #f0f0f0;
+  --inv-bg: #000000; --inv-fg: #ffffff;
+  --ring: rgba(26, 26, 26, 0.22);
+  --ok: #1b7a45; --ok-soft: #e5f3eb; --warn: #8a5a00; --warn-soft: #faf0dc;
+  --bad: #b3261e; --bad-soft: #fbe6e5; --info: #1f5fa0; --info-soft: #e4edf7;
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.05);
+  --shadow-2: 0 1px 2px rgba(0, 0, 0, 0.04), 0 4px 14px rgba(0, 0, 0, 0.05);
+  --shadow-3: 0 2px 6px rgba(0, 0, 0, 0.05), 0 16px 40px rgba(0, 0, 0, 0.12);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23666666' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0a0a0a; --canvas: #0a0a0a; --surface: #111111; --surface-2: #1a1a1a;
+  --line: #262626; --line-strong: #333333; --text: #ededed; --muted: #a1a1a1;
+  --primary: #ededed; --primary-ink: #0a0a0a; --primary-hover: #ffffff; --primary-soft: #1f1f1f;
+  --inv-bg: #ededed; --inv-fg: #0a0a0a;
+  --ring: rgba(237, 237, 237, 0.3);
+  --ok: #5cc98a; --ok-soft: #0f261a; --warn: #e6b450; --warn-soft: #2b220e;
+  --bad: #f2766d; --bad-soft: #2e1412; --info: #7db3ea; --info-soft: #102132;
+  --shadow-1: 0 0 0 1px rgba(255, 255, 255, 0.03);
+  --shadow-2: 0 0 0 1px rgba(255, 255, 255, 0.03), 0 8px 24px rgba(0, 0, 0, 0.55);
+  --shadow-3: 0 0 0 1px rgba(255, 255, 255, 0.05), 0 20px 48px rgba(0, 0, 0, 0.7);
+  --chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23a1a1a1' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+@theme inline {
+  --font-sans: "Roboto", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --color-bg: var(--bg);
+  --color-canvas: var(--canvas);
+  --color-surface: var(--surface);
+  --color-surface-2: var(--surface-2);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-fg: var(--text);
+  --color-muted: var(--muted);
+  --color-primary: var(--primary);
+  --color-primary-ink: var(--primary-ink);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-soft: var(--primary-soft);
+  --color-inv-bg: var(--inv-bg);
+  --color-inv-fg: var(--inv-fg);
+  --color-ok: var(--ok);
+  --color-ok-soft: var(--ok-soft);
+  --color-warn: var(--warn);
+  --color-warn-soft: var(--warn-soft);
+  --color-bad: var(--bad);
+  --color-bad-soft: var(--bad-soft);
+  --color-info: var(--info);
+  --color-info-soft: var(--info-soft);
+  --shadow-1: var(--shadow-1);
+  --shadow-2: var(--shadow-2);
+  --shadow-3: var(--shadow-3);
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-std: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Inverted surface: the Today's Sale blocks. Black on white flips to light on near-black in dark mode. */
+.inv {
+  --surface: var(--inv-bg);
+  --surface-2: color-mix(in srgb, var(--inv-fg) 11%, var(--inv-bg));
+  --text: var(--inv-fg);
+  --muted: color-mix(in srgb, var(--inv-fg) 68%, var(--inv-bg));
+  --line: color-mix(in srgb, var(--inv-fg) 22%, var(--inv-bg));
+  --line-strong: color-mix(in srgb, var(--inv-fg) 30%, var(--inv-bg));
+  --primary: var(--inv-fg);
+  --primary-ink: var(--inv-bg);
+  --primary-hover: color-mix(in srgb, var(--inv-fg) 85%, var(--inv-bg));
+  --primary-soft: color-mix(in srgb, var(--inv-fg) 16%, var(--inv-bg));
+  background: var(--surface);
+  color: var(--text);
+}
+
+html, body { background: var(--bg); color: var(--text); }
+body { font-family: var(--font-sans); font-size: 15px; line-height: 1.6; -webkit-font-smoothing: antialiased; }
+h1, h2, h3, h4 { text-wrap: balance; letter-spacing: -0.01em; }
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Theme switch: circular reveal replaces the default cross-fade. */
+::view-transition-old(root), ::view-transition-new(root) { animation: none; mix-blend-mode: normal; }
+.theme-fade, .theme-fade * {
+  transition: background-color 0.3s ease, border-color 0.3s ease, color 0.3s ease, fill 0.3s ease !important;
+}
+
+@keyframes blink { 50% { opacity: 0.2; } }
+.live-dot { width: 7px; height: 7px; border-radius: 999px; background: currentColor; animation: blink 1.4s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+}
+
+@media print {
+  .no-print { display: none !important; }
+  html, body { background: #fff !important; color: #000 !important; }
+}
