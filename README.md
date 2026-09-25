@@ -53,3 +53,4 @@ Things the mock only simulates:
 - **Emails:** the invoice email is recorded as sent. Password reset and SMS are not built.
 - **PDF invoices:** "Download PDF" uses the browser's Save as PDF. Production serves a stored PDF, plus FatturaPA XML through SDI once the accountant confirms the route (INV-09).
 - **Deal times:** computed in `Europe/Rome` from the server clock, with a client clock-offset correction (DEAL-06), and unit-tested across the DST change.
+# afifapos
