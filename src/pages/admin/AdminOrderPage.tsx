@@ -2,7 +2,7 @@ import { ArrowLeft, Ban, FileText, Mail, Pencil, Plus, Receipt, Trash2 } from 'l
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
-import { api, useAdminProducts, useAdminSettings, useApi, useOrder, useResellers } from '../../api/queries';
+import { api, useAdminProducts, useAdminSettings, useApi, useAudit, useOrder, useResellers } from '../../api/queries';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { QtyStepper } from '../../components/controls';
 import { FLOW, PaymentPill, StatusPill, TrackingBar } from '../../components/orderBits';
@@ -12,7 +12,7 @@ import { eur, parseEuro } from '../../domain/money';
 import { orderTotals, unitPrice } from '../../domain/pricing';
 import { formatRome, romeDateKey } from '../../domain/romeTime';
 import { PAYMENT_KINDS, type Order, type PaymentKind } from '../../domain/types';
-import { useBands, useDocumentTitle, useLang } from '../../lib/hooks';
+import { useBands, useCan, useDocumentTitle, useLang } from '../../lib/hooks';
 import { toast } from '../../store/toasts';
 import { OrderLines, OrderTotals } from '../shop/OrderPage';
 
@@ -186,6 +186,7 @@ export function AdminOrderPage() {
   const [paying, setPaying] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const can = useCan();
   useDocumentTitle(order.data?.number);
 
   if (order.isLoading) return <Skeleton className="h-96" />;
@@ -211,7 +212,7 @@ export function AdminOrderPage() {
           {o.payments.map((p) => (
             <Link key={p.id} to={`/receipt/${o.id}/${p.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><Receipt className="size-4" /> {t('receipt.short')} {p.receiptNumber}</Link>
           ))}
-          <Button variant="ghost" loading={resend.isPending} onClick={async () => { await resend.mutateAsync([o.id]); toast({ title: t('admin.resent'), tone: 'ok' }); }}><Mail className="size-4" /> {t('admin.resend')}</Button>
+          {can('orders.edit') && <Button variant="ghost" loading={resend.isPending} onClick={async () => { await resend.mutateAsync([o.id]); toast({ title: t('admin.resent'), tone: 'ok' }); }}><Mail className="size-4" /> {t('admin.resend')}</Button>}
         </div>
       </div>
       {!!error && <ErrorNote><ApiErrorMessage error={error} /></ErrorNote>}
@@ -220,9 +221,9 @@ export function AdminOrderPage() {
           {o.status !== 'cancelled' && <TrackingBar order={o} />}
           {!editing && (
             <div className="flex flex-wrap gap-2">
-              {nextStatus && <Button loading={setStatus.isPending} onClick={() => setStatus.mutate([o.id, nextStatus])}>{t(`admin.next.${nextStatus}`)}</Button>}
-              {editable && <Button variant="ghost" onClick={() => setEditing(true)}><Pencil className="size-4" /> {t('admin.edit.button')}</Button>}
-              {o.status !== 'cancelled' && o.status !== 'delivered' && !confirmCancel && <Button variant="danger" onClick={() => setConfirmCancel(true)}><Ban className="size-4" /> {t('admin.cancelOrder')}</Button>}
+              {nextStatus && can('orders.status') && <Button loading={setStatus.isPending} onClick={() => setStatus.mutate([o.id, nextStatus])}>{t(`admin.next.${nextStatus}`)}</Button>}
+              {editable && can('orders.edit') && <Button variant="ghost" onClick={() => setEditing(true)}><Pencil className="size-4" /> {t('admin.edit.button')}</Button>}
+              {o.status !== 'cancelled' && o.status !== 'delivered' && !confirmCancel && can('orders.cancel') && <Button variant="danger" onClick={() => setConfirmCancel(true)}><Ban className="size-4" /> {t('admin.cancelOrder')}</Button>}
               {confirmCancel && (
                 <span className="flex flex-wrap items-center gap-2 text-sm">
                   <span className="text-bad">{t('admin.cancelConfirm')}</span>
@@ -267,11 +268,41 @@ export function AdminOrderPage() {
               </div>
             ))}
             {o.paymentStatus === 'partial' && <p className="text-[13px] text-warn">{t('admin.pay.stillDue', { x: eur(o.totalCents - o.payments.reduce((a, p) => a + p.amountCents, 0), lang) })}</p>}
-            {o.paymentStatus !== 'paid' && !paying && <Button variant="ghost" className="justify-self-start" onClick={() => setPaying(true)}>{o.payments.length ? t('admin.pay.update') : t('admin.markPaid')}</Button>}
+            {o.paymentStatus !== 'paid' && !paying && can('payments.record') && <Button variant="ghost" className="justify-self-start" onClick={() => setPaying(true)}>{o.payments.length ? t('admin.pay.update') : t('admin.markPaid')}</Button>}
             {paying && <PaymentForm order={o} onDone={() => setPaying(false)} />}
           </Card>
+          {can('audit.view') && <Timeline order={o} />}
         </div>
       </div>
     </div>
+  );
+}
+
+/** ORD-05: everything that happened to the order, newest first, from the status history and the audit log. */
+function Timeline({ order: o }: { order: Order }) {
+  const { t } = useTranslation();
+  const lang = useLang();
+  const log = useAudit();
+  const keys = [o.number, o.invoiceNumber, ...o.payments.map((p) => p.receiptNumber)];
+  const events = [
+    { at: o.placedAt, who: o.businessName, what: t('timeline.placed', { total: eur(o.totalCents, lang) }) },
+    ...(log.data ?? []).filter((a) => keys.some((k) => a.action.includes(k))).map((a) => ({ at: a.at, who: a.actor, what: a.action })),
+  ].sort((a, b) => b.at.localeCompare(a.at));
+  return (
+    <Card className="grid gap-3 p-5 text-sm">
+      <h2 className="font-medium">{t('timeline.title')}</h2>
+      <ol className="grid">
+        {events.map((e, i) => (
+          <li key={i} className="relative grid grid-cols-[14px_1fr] gap-3 pb-3 last:pb-0">
+            {i < events.length - 1 && <span className="absolute bottom-0 left-[6px] top-4 w-px bg-line" aria-hidden />}
+            <span className="z-10 mt-1.5 size-3 rounded-full border-2 border-line-strong bg-surface" aria-hidden />
+            <div>
+              <p>{e.what}</p>
+              <p className="text-xs text-muted">{e.who} · {formatRome(e.at, lang)}</p>
+            </div>
+          </li>
+        ))}
+      </ol>
+    </Card>
   );
 }

@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMe, useOrder, useSellerDetails } from '../api/queries';
 import { ApiErrorMessage } from '../components/ApiErrorMessage';
+import { Barcode } from '../components/Barcode';
 import { Brand } from '../components/Brand';
 import { PaymentIcon } from '../components/PaymentIcon';
 import { Button, ErrorNote, Skeleton } from '../components/ui';
@@ -65,6 +66,7 @@ export function ReceiptPage() {
             <h1 className="text-2xl font-bold tracking-tight">{L('receipt.title')}</h1>
             <p className="num text-base font-medium">{payment.receiptNumber}</p>
             <p className="text-[#666]">{L('receipt.issued')}: {formatRome(payment.recordedAt, lang, false)}</p>
+            <Barcode value={o.number} className="mt-1 h-[15mm] w-auto" />
           </div>
         </header>
 

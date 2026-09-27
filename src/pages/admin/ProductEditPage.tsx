@@ -4,11 +4,11 @@ import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
 import { api, useAdminProducts, useAdminSettings, useApi } from '../../api/queries';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
-import { categories } from '../../components/ProductIcon';
+import { useCategoryList } from '../../components/ProductIcon';
 import { ExpiryBadge, ProductImage } from '../../components/productBits';
 import { Button, Card, EmptyState, ErrorNote, EuroInput, Field, Input, PageHeader, Select, Skeleton } from '../../components/ui';
 import { eur, parseEuro } from '../../domain/money';
-import type { CategoryId, Product } from '../../domain/types';
+import type { Product } from '../../domain/types';
 import { useBands, useDocumentTitle, useLang } from '../../lib/hooks';
 import { fitTiers } from '../../domain/pricing';
 import { resizeImage } from '../../lib/image';
@@ -22,10 +22,11 @@ function Editor({ product: p }: { product: Product }) {
   const lang = useLang();
   const settings = useAdminSettings();
   const save = useApi(api.updateProduct);
+  const cats = useCategoryList();
   const { labels } = useBands();
   const [f, setF] = useState({
     nameEn: p.name.en, nameIt: p.name.it, packEn: p.pack.en, packIt: p.pack.it, descEn: p.description.en, descIt: p.description.it,
-    sku: p.sku, ean: p.ean, brand: p.brand, origin: p.origin, category: p.category as CategoryId,
+    sku: p.sku, ean: p.ean, brand: p.brand, origin: p.origin, category: p.category,
     tiers: fitTiers(p.tiers, labels.length).map((c) => (c / 100).toFixed(2)),
     stock: String(p.stock), vatRateId: p.vatRateId, expiryDate: p.expiryDate ?? '', active: p.active, image: p.image,
   });
@@ -71,8 +72,8 @@ function Editor({ product: p }: { product: Product }) {
             <Field label={`${t('product.pack')} (EN)`} htmlFor="pp-en" hint={t('admin.product.packHint')}><Input id="pp-en" value={f.packEn} onChange={(e) => set('packEn', e.target.value)} /></Field>
             <Field label={`${t('product.pack')} (IT)`} htmlFor="pp-it"><Input id="pp-it" value={f.packIt} onChange={(e) => set('packIt', e.target.value)} /></Field>
             <Field label={t('catalog.category')} htmlFor="p-cat">
-              <Select id="p-cat" value={f.category} onChange={(e) => set('category', e.target.value as CategoryId)}>
-                {categories.map((c) => <option key={c} value={c}>{t(`cat.${c}`)}</option>)}
+              <Select id="p-cat" value={f.category} onChange={(e) => set('category', e.target.value)}>
+                {cats.list.map((c) => <option key={c.id} value={c.id}>{cats.name(c.id)}{c.active ? '' : ` (${t('admin.product.hidden')})`}</option>)}
               </Select>
             </Field>
             <Field label={t('product.brand')} htmlFor="p-brand"><Input id="p-brand" value={f.brand} onChange={(e) => set('brand', e.target.value)} /></Field>

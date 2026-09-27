@@ -5,9 +5,9 @@ import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
 import { useProducts } from '../../api/queries';
 import { ProductCard } from '../../components/cards';
-import { categories } from '../../components/ProductIcon';
+import { useCategoryList } from '../../components/ProductIcon';
+import { norm } from '../../lib/text';
 import { EmptyState, ErrorNote, PageHeader, Select, Skeleton } from '../../components/ui';
-import type { CategoryId } from '../../domain/types';
 import { useDocumentTitle, useLang, useSale } from '../../lib/hooks';
 
 export function CatalogPage() {
@@ -17,7 +17,8 @@ export function CatalogPage() {
   const products = useProducts();
   const sale = useSale(5000);
   const [params, setParams] = useSearchParams();
-  const cat = (params.get('cat') ?? 'all') as CategoryId | 'all';
+  const cat = params.get('cat') ?? 'all';
+  const cats = useCategoryList();
   const q = params.get('q') ?? '';
   const inStock = params.get('stock') === '1';
   const sort = params.get('sort') ?? 'name';
@@ -30,12 +31,12 @@ export function CatalogPage() {
   };
 
   const list = useMemo(() => {
-    const needle = q.trim().toLowerCase();
+    const needle = norm(q.trim());
     const out = (products.data ?? []).filter(
       (p) =>
         (cat === 'all' || p.category === cat) &&
         (!inStock || p.stock > 0) &&
-        (!needle || [p.name.en, p.name.it, p.sku].some((s) => s.toLowerCase().includes(needle))),
+        (!needle || p.ean === q.trim() || [p.name.en, p.name.it, p.sku, p.brand].some((s) => norm(s).includes(needle))),
     );
     return out.sort((a, b) => (sort === 'price' ? a.tiers[0] - b.tiers[0] : a.name[lang].localeCompare(b.name[lang])));
   }, [products.data, cat, inStock, q, sort, lang]);
@@ -52,9 +53,9 @@ export function CatalogPage() {
           <div className="grid gap-2">
             <h2 className="text-[11px] font-medium uppercase tracking-[.08em] text-muted">{t('catalog.category')}</h2>
             <div className="flex flex-wrap gap-1.5">
-              {(['all', ...categories] as const).map((c) => (
+              {['all', ...cats.active.map((c) => c.id)].map((c) => (
                 <button key={c} type="button" aria-pressed={cat === c} onClick={() => set('cat', c)} className={clsx('h-8 rounded-full border px-3 text-[13px] transition-colors', cat === c ? 'border-primary bg-primary text-primary-ink' : 'border-line-strong bg-surface hover:bg-surface-2')}>
-                  {c === 'all' ? t('catalog.all') : t(`cat.${c}`)}
+                  {c === 'all' ? t('catalog.all') : cats.name(c)}
                 </button>
               ))}
             </div>

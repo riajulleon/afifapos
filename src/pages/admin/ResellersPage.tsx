@@ -1,10 +1,13 @@
-import { useMemo } from 'react';
+import { FileUp, Search, UserPlus } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
+import { Link } from 'react-router';
 import { useAdminCities, useAdminOrders, useResellers } from '../../api/queries';
 import { PageHeader, Pill, Skeleton } from '../../components/ui';
 import { eur } from '../../domain/money';
 import { formatRome } from '../../domain/romeTime';
-import { useDocumentTitle, useLang } from '../../lib/hooks';
+import { useCan, useDocumentTitle, useLang } from '../../lib/hooks';
+import { compact } from '../../lib/text';
 
 export function ResellersPage() {
   const { t } = useTranslation();
@@ -13,6 +16,8 @@ export function ResellersPage() {
   const users = useResellers();
   const orders = useAdminOrders();
   const cities = useAdminCities();
+  const can = useCan();
+  const [q, setQ] = useState('');
   const stats = useMemo(() => {
     const m = new Map<string, { total: number; count: number; last: string }>();
     for (const o of orders.data ?? []) {
@@ -26,10 +31,21 @@ export function ResellersPage() {
     return m;
   }, [orders.data]);
   if (users.isLoading) return <Skeleton className="h-96" />;
-  const rows = [...(users.data ?? [])].sort((a, b) => (stats.get(b.id)?.total ?? 0) - (stats.get(a.id)?.total ?? 0));
+  const rows = [...(users.data ?? [])].filter((u) => !q || compact([u.businessName, u.fullName, u.email, u.vatNumber, u.mobile].join(' ')).includes(compact(q))).sort((a, b) => (stats.get(b.id)?.total ?? 0) - (stats.get(a.id)?.total ?? 0));
   return (
     <div className="grid gap-5">
-      <PageHeader title={t('admin.nav.resellers')} sub={t('admin.resellersSub', { count: rows.length })} />
+      <PageHeader
+        title={t('admin.nav.resellers')}
+        sub={t('admin.resellersSub', { count: rows.length })}
+        actions={<>
+          {can('resellers.import') && <Link to="/admin/resellers/import" className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><FileUp className="size-4" /> {t('imp.title')}</Link>}
+          {can('resellers.create') && <Link to="/admin/resellers/new" className="inline-flex h-9 items-center gap-2 rounded-lg bg-primary px-4 text-sm font-medium text-primary-ink hover:bg-primary-hover"><UserPlus className="size-4" /> {t('res.new')}</Link>}
+        </>}
+      />
+      <label className="flex h-10 max-w-md items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 focus-within:border-fg">
+        <Search className="size-4 text-muted" aria-hidden />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('res.search')} aria-label={t('res.search')} className="w-full bg-transparent text-sm outline-none" />
+      </label>
       <div className="overflow-x-auto rounded-xl border border-line bg-surface shadow-1">
         <table className="w-full min-w-[760px] text-[13px]">
           <thead>
@@ -48,7 +64,7 @@ export function ResellersPage() {
               const city = cities.data?.find((c) => c.id === u.cityId);
               return (
                 <tr key={u.id} className="border-t border-line">
-                  <td className="px-4 py-2.5"><b className="font-medium">{u.businessName}</b><br /><span className="text-muted">{u.fullName} · {u.email}</span></td>
+                  <td className="px-4 py-2.5"><Link to={`/admin/resellers/${u.id}`} className="font-medium hover:underline">{u.businessName}</Link><br /><span className="text-muted">{u.fullName} · {u.email}</span></td>
                   <td className="px-4 py-2.5 text-muted">{city?.name} › {city?.zones.find((z) => z.id === u.zoneId)?.name}</td>
                   <td className="px-4 py-2.5"><Pill tone={u.state === 'approved' ? 'ok' : u.state === 'rejected' || u.state === 'suspended' ? 'bad' : 'warn'}>{t(`admin.state.${u.state}`)}</Pill></td>
                   <td className="num px-4 py-2.5 text-right">{s?.count ?? 0}</td>

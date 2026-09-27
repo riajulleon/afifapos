@@ -3,7 +3,19 @@
 export type Lang = 'en' | 'it';
 export type Localized = Record<Lang, string>;
 
-export type CategoryId = 'grain' | 'oil' | 'spice' | 'flour' | 'canned' | 'drink';
+/** Category ids are records now (Admin › Categories); the seed keeps the original ids like 'grain'. */
+export type CategoryId = string;
+
+export interface Category {
+  id: string;
+  name: Localized;
+  /** Built-in line icon name (see ProductIcon), used when there is no uploaded image. */
+  icon: string;
+  /** Uploaded SVG/PNG as a data URL (CAT-02). */
+  image: string | null;
+  sort: number;
+  active: boolean;
+}
 
 export interface VatRate {
   id: string;
@@ -68,12 +80,32 @@ export interface Deal {
 }
 
 export type AccountState = 'pending' | 'info_requested' | 'approved' | 'rejected' | 'suspended';
-export type Role = 'reseller' | 'owner' | 'manager';
+/** A user is either a reseller (buyer) or staff; staff get their permissions from a role (USR, ROLE). */
+export type Role = 'reseller' | 'staff';
+
+export const PERMISSIONS = [
+  'orders.view', 'orders.edit', 'orders.status', 'orders.cancel', 'orders.export', 'payments.record',
+  'resellers.view', 'resellers.create', 'resellers.edit', 'resellers.approve', 'resellers.delete', 'resellers.import',
+  'products.view', 'products.edit', 'categories.edit', 'deals.edit', 'rules.edit',
+  'settings.edit', 'users.manage', 'audit.view',
+] as const;
+export type Permission = (typeof PERMISSIONS)[number];
+
+export interface StaffRole {
+  id: string;
+  name: string;
+  builtIn: boolean;
+  permissions: Permission[];
+}
 
 export interface UploadedDoc {
   name: string;
   size: number;
   type: string;
+  /** Key of the file in the browser file store (mock); a storage key in production. Seed documents have none. */
+  fileId?: string;
+  uploadedBy?: 'applicant' | 'admin';
+  uploadedAt?: string;
 }
 
 export interface User {
@@ -93,9 +125,15 @@ export interface User {
   sdiOrPec: string; // SDI recipient code or PEC (AUTH-03)
   licenceDoc?: UploadedDoc;
   vatDoc?: UploadedDoc;
+  /** Extra files, e.g. a licence the admin received by email (APR-03). */
+  extraDocs?: UploadedDoc[];
   lang: Lang;
   createdAt: string;
   reviewNote?: string;
+  /** Staff only. */
+  roleId?: string;
+  /** Filled by the API on `me()`: what this user may do. */
+  permissions?: Permission[];
 }
 
 /** All payments are manual (PAY). The kind picks the icon and what the reference field means. */

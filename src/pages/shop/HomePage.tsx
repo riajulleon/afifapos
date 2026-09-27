@@ -8,9 +8,8 @@ import { useMe, useMyOrders, useProducts, useTopSellers } from '../../api/querie
 import { ProductCard } from '../../components/cards';
 import { SaleBackdrop } from '../../components/SaleBackdrop';
 import { Countdown } from '../../components/controls';
-import { categories, categoryIcon, ProductIcon } from '../../components/ProductIcon';
+import { CategoryIcon, ProductIcon, useCategoryList } from '../../components/ProductIcon';
 import { EmptyState, OffBadge, Skeleton } from '../../components/ui';
-import type { CategoryId } from '../../domain/types';
 import { eur } from '../../domain/money';
 import { formatRome } from '../../domain/romeTime';
 import { discountPct, useDocumentTitle, useLang, useSale } from '../../lib/hooks';
@@ -24,6 +23,7 @@ export function HomePage() {
   useDocumentTitle();
   const sale = useSale();
   const orders = useMyOrders();
+  const cats = useCategoryList();
   const add = useCart((s) => s.add);
   const top = [...sale.live].sort((a, b) => Number(b.featured) - Number(a.featured) || a.sort - b.sort).slice(0, 3);
   const maxPct = Math.max(0, ...sale.live.map((d) => discountPct(sale.productById.get(d.productId)?.tiers[0] ?? d.priceCents, d.priceCents)));
@@ -86,12 +86,12 @@ export function HomePage() {
           <Link to="/catalog" className="text-sm font-medium underline underline-offset-4">{t('home.all')}</Link>
         </div>
         <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-6">
-          {categories.map((c) => (
-            <Link key={c} to={`/catalog?cat=${c}`} className="grid justify-items-center gap-2 rounded-xl border border-line bg-surface px-2 py-4 text-center text-[13px] font-medium transition-[border-color,translate] duration-200 hover:-translate-y-0.5 hover:border-fg">
+          {cats.active.map((c) => (
+            <Link key={c.id} to={`/catalog?cat=${c.id}`} className="grid justify-items-center gap-2 rounded-xl border border-line bg-surface px-2 py-4 text-center text-[13px] font-medium transition-[border-color,translate] duration-200 hover:-translate-y-0.5 hover:border-fg">
               <span className="grid size-12 place-items-center rounded-full bg-surface-2">
-                <ProductIcon name={categoryIcon[c]} className="size-[22px]" strokeWidth={1.75} />
+                <CategoryIcon category={c} />
               </span>
-              {t(`cat.${c}`)}
+              {cats.name(c.id)}
             </Link>
           ))}
         </div>
@@ -131,10 +131,11 @@ function TopSellers({ byProduct }: { byProduct: ReturnType<typeof useSale>['byPr
   const { t } = useTranslation();
   const top = useTopSellers();
   const products = useProducts();
-  const [cat, setCat] = useState<CategoryId | 'all'>('all');
+  const [cat, setCat] = useState<string>('all');
+  const catList = useCategoryList();
   const byId = new Map((products.data ?? []).map((p) => [p.id, p]));
   const ranked = (top.data ?? []).map((r) => ({ ...r, product: byId.get(r.productId) })).filter((r) => r.product);
-  const cats = categories.filter((c) => ranked.some((r) => r.product!.category === c));
+  const cats = catList.active.map((c) => c.id).filter((c) => ranked.some((r) => r.product!.category === c));
   const list = ranked.filter((r) => cat === 'all' || r.product!.category === cat).slice(0, 8);
 
   return (
@@ -150,7 +151,7 @@ function TopSellers({ byProduct }: { byProduct: ReturnType<typeof useSale>['byPr
         <div className="flex flex-wrap gap-1.5" role="group" aria-label={t('catalog.category')}>
           {(['all', ...cats] as const).map((c) => (
             <button key={c} type="button" aria-pressed={cat === c} onClick={() => setCat(c)} className={clsx('h-8 rounded-full border px-3.5 text-[13px] transition-colors', cat === c ? 'border-primary bg-primary text-primary-ink' : 'border-line-strong bg-surface hover:bg-surface-2')}>
-              {c === 'all' ? t('catalog.all') : t(`cat.${c}`)}
+              {c === 'all' ? t('catalog.all') : catList.name(c)}
             </button>
           ))}
         </div>

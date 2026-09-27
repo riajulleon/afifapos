@@ -1,4 +1,6 @@
+import { ScanLine } from 'lucide-react';
 import { useState } from 'react';
+import { compact, norm } from '../../lib/text';
 import { useTranslation } from 'react-i18next';
 import { api, useAdminProducts, useAdminSettings, useApi } from '../../api/queries';
 import { Link } from 'react-router';
@@ -19,6 +21,7 @@ export function ProductsPage() {
   const update = useApi(api.updateProduct);
   const { labels } = useBands();
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [q, setQ] = useState('');
   const [bulkRate, setBulkRate] = useState('');
   if (products.isLoading || settings.isLoading) return <Skeleton className="h-96" />;
   const rates = settings.data!.vatRates;
@@ -32,6 +35,10 @@ export function ProductsPage() {
   return (
     <div className="grid gap-5">
       <PageHeader title={t('admin.nav.products')} sub={t('admin.productsSub')} />
+      <label className="flex h-10 max-w-md items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 focus-within:border-fg">
+        <ScanLine className="size-4 text-muted" aria-hidden />
+        <input value={q} onChange={(e) => setQ(e.target.value)} placeholder={t('prd.search')} aria-label={t('prd.search')} className="w-full bg-transparent text-sm outline-none" />
+      </label>
       {selected.size > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-xl border border-line bg-surface p-3 shadow-1">
           <span className="text-sm">{t('admin.selected', { count: selected.size })}</span>
@@ -66,7 +73,7 @@ export function ProductsPage() {
             </tr>
           </thead>
           <tbody>
-            {products.data!.map((p) => (
+            {products.data!.filter((p) => !q || p.ean === q.trim() || compact(p.sku).startsWith(compact(q)) || norm(`${p.name.en} ${p.name.it} ${p.brand}`).includes(norm(q.trim()))).map((p) => (
               <tr key={p.id} className="border-t border-line">
                 <td className="px-4 py-2"><input type="checkbox" aria-label={p.name[lang]} checked={selected.has(p.id)} onChange={(e) => { const s = new Set(selected); if (e.target.checked) s.add(p.id); else s.delete(p.id); setSelected(s); }} className="accent-[var(--primary)]" /></td>
                 <td className="px-2 py-2">

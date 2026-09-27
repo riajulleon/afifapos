@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Bell, Boxes, ClipboardList, ExternalLink, Flame, History, LayoutDashboard, LogOut, MapPin, Menu, Settings, UserCheck, Users, X } from 'lucide-react';
+import { Bell, Boxes, ClipboardList, ExternalLink, Flame, History, KeyRound, LayoutDashboard, LogOut, MapPin, Menu, Settings, Tags, UserCheck, Users, X } from 'lucide-react';
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { Footer } from '../components/Footer';
 import { LangSwitch, ThemeToggle } from '../components/controls';
 import { eur } from '../domain/money';
 import { formatRome } from '../domain/romeTime';
-import { useLang } from '../lib/hooks';
+import { useCan, useLang } from '../lib/hooks';
 import { toast } from '../store/toasts';
 
 interface Alert { id: string; orderId: string; title: string; body: string; at: string; read: boolean }
@@ -92,23 +92,26 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   const apps = useApplications();
   const orders = useAdminOrders();
   const newOrders = orders.data?.filter((o) => o.status === 'received').length ?? 0;
+  const can = useCan();
   const item = ({ isActive }: { isActive: boolean }) => clsx('flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-sm transition-colors', isActive ? 'bg-white/12 font-medium text-white' : 'text-[#c4c4c4] hover:bg-white/6 hover:text-white');
   const badge = (n: number) => n > 0 && <em className="num ml-auto rounded-full bg-white px-1.5 text-[10.5px] font-bold not-italic text-black">{n}</em>;
   const group = (label: string) => <p className="px-2.5 pb-1 pt-4 text-[10px] font-medium uppercase tracking-[.1em] text-[#8a8a8a]">{label}</p>;
   return (
     <nav className="grid content-start gap-0.5" aria-label="Admin" onClick={onNavigate}>
       <NavLink to="/admin" end className={item}><LayoutDashboard className="size-4" /> {t('admin.nav.overview')}</NavLink>
-      <NavLink to="/admin/orders" className={item}><ClipboardList className="size-4" /> {t('admin.nav.orders')} {badge(newOrders)}</NavLink>
-      <NavLink to="/admin/approvals" className={item}><UserCheck className="size-4" /> {t('admin.nav.approvals')} {badge(apps.data?.length ?? 0)}</NavLink>
-      <NavLink to="/admin/resellers" className={item}><Users className="size-4" /> {t('admin.nav.resellers')}</NavLink>
-      {group(t('admin.nav.catalog'))}
-      <NavLink to="/admin/products" className={item}><Boxes className="size-4" /> {t('admin.nav.products')}</NavLink>
-      <NavLink to="/admin/deals" className={item}><Flame className="size-4" /> {t('sale.nav')}</NavLink>
-      {group(t('admin.nav.rules'))}
-      <NavLink to="/admin/rules" className={item}><MapPin className="size-4" /> {t('admin.nav.cities')}</NavLink>
-      {group(t('admin.nav.system'))}
-      <NavLink to="/admin/settings" className={item}><Settings className="size-4" /> {t('admin.nav.settings')}</NavLink>
-      <NavLink to="/admin/audit" className={item}><History className="size-4" /> {t('admin.nav.audit')}</NavLink>
+      {can('orders.view') && <NavLink to="/admin/orders" className={item}><ClipboardList className="size-4" /> {t('admin.nav.orders')} {badge(newOrders)}</NavLink>}
+      {can('resellers.approve') && <NavLink to="/admin/approvals" className={item}><UserCheck className="size-4" /> {t('admin.nav.approvals')} {badge(apps.data?.length ?? 0)}</NavLink>}
+      {can('resellers.view') && <NavLink to="/admin/resellers" className={item}><Users className="size-4" /> {t('admin.nav.resellers')}</NavLink>}
+      {(can('products.view') || can('deals.edit')) && group(t('admin.nav.catalog'))}
+      {can('products.view') && <NavLink to="/admin/products" className={item}><Boxes className="size-4" /> {t('admin.nav.products')}</NavLink>}
+      {can('products.view') && <NavLink to="/admin/categories" className={item}><Tags className="size-4" /> {t('admin.nav.categories')}</NavLink>}
+      {can('deals.edit') && <NavLink to="/admin/deals" className={item}><Flame className="size-4" /> {t('sale.nav')}</NavLink>}
+      {can('rules.edit') && group(t('admin.nav.rules'))}
+      {can('rules.edit') && <NavLink to="/admin/rules" className={item}><MapPin className="size-4" /> {t('admin.nav.cities')}</NavLink>}
+      {(can('settings.edit') || can('users.manage') || can('audit.view')) && group(t('admin.nav.system'))}
+      {can('users.manage') && <NavLink to="/admin/users" className={item}><KeyRound className="size-4" /> {t('admin.nav.users')}</NavLink>}
+      {can('settings.edit') && <NavLink to="/admin/settings" className={item}><Settings className="size-4" /> {t('admin.nav.settings')}</NavLink>}
+      {can('audit.view') && <NavLink to="/admin/audit" className={item}><History className="size-4" /> {t('admin.nav.audit')}</NavLink>}
     </nav>
   );
 }

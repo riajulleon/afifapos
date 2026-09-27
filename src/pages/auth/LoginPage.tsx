@@ -71,6 +71,8 @@ export function LoginPage() {
             <li>Reseller · ordini@bottegasapori.it · wholesale1</li>
             <li>Reseller (mobile) · 347 812 4590 · wholesale1</li>
             <li>Admin · admin@afifa.it · admin12345</li>
+            <li>Warehouse staff · magazzino@afifa.it · warehouse1</li>
+            <li>Accountant · contabilita@afifa.it · accounts01</li>
             <li>Pending · minimarket.pigneto@gmail.com · wholesale1</li>
           </ul>
         </details>

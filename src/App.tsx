@@ -1,6 +1,7 @@
 import { LoaderCircle } from 'lucide-react';
 import { lazy, Suspense, type ComponentType } from 'react';
 import { createBrowserRouter, Navigate, Outlet, RouterProvider } from 'react-router';
+import { RequirePerm } from './components/RequirePerm';
 import { Toaster } from './components/Toaster';
 import { useMe } from './api/queries';
 import { ShopLayout } from './layouts/ShopLayout';
@@ -45,6 +46,10 @@ const admin = {
   rules: () => lazyNamed(() => import('./pages/admin/RulesPage'), 'RulesPage'),
   settings: () => lazyNamed(() => import('./pages/admin/SettingsPage'), 'SettingsPage'),
   audit: () => lazyNamed(() => import('./pages/admin/AuditPage'), 'AuditPage'),
+  staff: () => lazyNamed(() => import('./pages/admin/StaffPage'), 'StaffPage'),
+  categories: () => lazyNamed(() => import('./pages/admin/CategoriesPage'), 'CategoriesPage'),
+  reseller: () => lazyNamed(() => import('./pages/admin/ResellerPage'), 'ResellerPage'),
+  importResellers: () => lazyNamed(() => import('./pages/admin/ResellerImportPage'), 'ResellerImportPage'),
 };
 
 /** Only approved accounts reach the shop (AUTH-04). Pending applicants see their status page. */
@@ -121,16 +126,20 @@ const router = createBrowserRouter([
         element: admin.layout(),
         children: [
           { index: true, element: admin.overview() },
-          { path: 'orders', element: admin.orders() },
-          { path: 'orders/:id', element: admin.order() },
-          { path: 'approvals', element: admin.approvals() },
-          { path: 'resellers', element: admin.resellers() },
-          { path: 'products', element: admin.products() },
-          { path: 'products/:id', element: admin.product() },
-          { path: 'deals', element: admin.deals() },
-          { path: 'rules', element: admin.rules() },
-          { path: 'settings', element: admin.settings() },
-          { path: 'audit', element: admin.audit() },
+          { path: 'orders', element: <RequirePerm perm="orders.view">{admin.orders()}</RequirePerm> },
+          { path: 'orders/:id', element: <RequirePerm perm="orders.view">{admin.order()}</RequirePerm> },
+          { path: 'approvals', element: <RequirePerm perm="resellers.approve">{admin.approvals()}</RequirePerm> },
+          { path: 'resellers', element: <RequirePerm perm="resellers.view">{admin.resellers()}</RequirePerm> },
+          { path: 'resellers/import', element: <RequirePerm perm="resellers.import">{admin.importResellers()}</RequirePerm> },
+          { path: 'resellers/:id', element: <RequirePerm perm="resellers.view">{admin.reseller()}</RequirePerm> },
+          { path: 'products', element: <RequirePerm perm="products.view">{admin.products()}</RequirePerm> },
+          { path: 'products/:id', element: <RequirePerm perm="products.view">{admin.product()}</RequirePerm> },
+          { path: 'categories', element: <RequirePerm perm="products.view">{admin.categories()}</RequirePerm> },
+          { path: 'deals', element: <RequirePerm perm="deals.edit">{admin.deals()}</RequirePerm> },
+          { path: 'rules', element: <RequirePerm perm="rules.edit">{admin.rules()}</RequirePerm> },
+          { path: 'users', element: <RequirePerm perm="users.manage">{admin.staff()}</RequirePerm> },
+          { path: 'settings', element: <RequirePerm perm="settings.edit">{admin.settings()}</RequirePerm> },
+          { path: 'audit', element: <RequirePerm perm="audit.view">{admin.audit()}</RequirePerm> },
         ],
       },
     ],

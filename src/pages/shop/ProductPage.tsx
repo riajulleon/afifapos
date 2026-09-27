@@ -7,6 +7,7 @@ import { Link, useParams } from 'react-router';
 import { usePublicSettings, useProducts } from '../../api/queries';
 import { QtyStepper } from '../../components/controls';
 import { ExpiryBadge, ProductImage } from '../../components/productBits';
+import { useCategoryList } from '../../components/ProductIcon';
 import { Button, EmptyState, OffBadge, Pill, Skeleton } from '../../components/ui';
 import { eur } from '../../domain/money';
 import { bandIndex, bandPrice } from '../../domain/pricing';
@@ -20,6 +21,7 @@ export function ProductPage() {
   const lang = useLang();
   const { id = '' } = useParams();
   const products = useProducts();
+  const cats = useCategoryList();
   const settings = usePublicSettings();
   const sale = useSale(5000);
   const allowance = useAllowanceLeft();
@@ -63,7 +65,7 @@ export function ProductPage() {
 
         <div className="grid content-start gap-5">
           <div className="grid gap-2">
-            <p className="text-[13px] font-medium uppercase tracking-[.08em] text-muted">{t(`cat.${p.category}`)}{p.brand && ` · ${p.brand}`}</p>
+            <p className="text-[13px] font-medium uppercase tracking-[.08em] text-muted">{cats.name(p.category)}{p.brand && ` · ${p.brand}`}</p>
             <h1 className="text-[30px] font-bold leading-tight tracking-tight">{p.name[lang]}</h1>
             <p className="text-muted">{p.pack[lang]}</p>
             <div className="flex flex-wrap gap-2 pt-1">

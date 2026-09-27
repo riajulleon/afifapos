@@ -2,7 +2,7 @@ import { useEffect, useMemo } from 'react';
 import { useBoughtToday, useDeals, useMe, useProducts, usePublicSettings } from '../api/queries';
 import { bandLabels, DEFAULT_BANDS, isDealLive, minQty } from '../domain/pricing';
 import { dealWindow, romeDateKey } from '../domain/romeTime';
-import type { Deal, Product } from '../domain/types';
+import type { Deal, Permission, Product } from '../domain/types';
 import { usePrefs } from '../store/prefs';
 import { useNow } from './useNow';
 
@@ -50,4 +50,11 @@ export function useBands() {
   const settings = usePublicSettings();
   const bands = settings.data?.pricing ?? DEFAULT_BANDS;
   return { bands, min: minQty(bands), labels: bandLabels(bands) };
+}
+
+/** Staff permission check for showing controls; the server checks again on every call (USR-06). */
+export function useCan() {
+  const me = useMe();
+  const perms = me.data?.permissions ?? [];
+  return (p: Permission) => perms.includes(p);
 }

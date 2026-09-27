@@ -1,4 +1,6 @@
-import { FileText, UserCheck } from 'lucide-react';
+import { Pencil, UserCheck } from 'lucide-react';
+import { Link } from 'react-router';
+import { DocChip } from '../../components/DocViewer';
 import { AnimatePresence, motion } from 'motion/react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,7 +9,6 @@ import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { Button, EmptyState, ErrorNote, Input, PageHeader, Pill, Skeleton } from '../../components/ui';
 import { formatRome } from '../../domain/romeTime';
 import { useDocumentTitle, useLang } from '../../lib/hooks';
-import { formatBytes } from '../../lib/validate';
 import { toast } from '../../store/toasts';
 
 export function ApprovalsPage() {
@@ -56,17 +57,16 @@ export function ApprovalsPage() {
                       <dt className="text-muted">SDI / PEC</dt><dd>{u.sdiOrPec}</dd>
                       <dt className="text-muted">{t('admin.applied')}</dt><dd>{formatRome(u.createdAt, lang)}</dd>
                     </dl>
-                    <div className="flex flex-wrap gap-2 pt-1">
-                      {[u.licenceDoc, u.vatDoc].filter(Boolean).map((d) => (
-                        <span key={d!.name} className="inline-flex items-center gap-1.5 rounded-md border border-line bg-surface-2 px-2 py-1 text-xs" title={t('admin.docsNote')}>
-                          <FileText className="size-3.5" /> {d!.name} · {formatBytes(d!.size)}
-                        </span>
-                      ))}
+                    <div className="grid gap-2 pt-1 sm:grid-cols-2">
+                      {u.licenceDoc && <DocChip doc={u.licenceDoc} label={t('apply.licence')} />}
+                      {u.vatDoc && <DocChip doc={u.vatDoc} label={t('apply.vatDoc')} />}
+                      {(u.extraDocs ?? []).map((d, i) => <DocChip key={i} doc={d} label={t('docs.extra')} />)}
                     </div>
                     {u.reviewNote && <p className="text-[13px] text-muted">{t('admin.lastNote')}: “{u.reviewNote}”</p>}
                   </div>
                   <div className="grid content-start gap-2 lg:w-64">
                     <Button loading={review.isPending && !noteFor} onClick={() => act(u.id, 'approve', u.businessName)}>{t('admin.review.approve')}</Button>
+                    <Link to={`/admin/resellers/${u.id}`} className="inline-flex h-9 items-center justify-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><Pencil className="size-4" /> {t('res.editDetails')}</Link>
                     <Button variant="ghost" onClick={() => { setNoteFor({ id: u.id, kind: 'info' }); setNote(''); }}>{t('admin.review.info')}</Button>
                     <Button variant="danger" onClick={() => { setNoteFor({ id: u.id, kind: 'reject' }); setNote(''); }}>{t('admin.review.reject')}</Button>
                     {noteFor?.id === u.id && (

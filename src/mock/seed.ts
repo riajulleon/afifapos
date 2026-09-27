@@ -1,7 +1,7 @@
 // Sample data for the mock API. Everything here is example content, replaced by the real database in Phase 3.
 import { DEFAULT_BANDS, orderTotals, unitPrice } from '../domain/pricing';
 import { addDays, romeDateKey, romeWallTimeToUtc } from '../domain/romeTime';
-import type { AuditEntry, City, Deal, Order, OrderStatus, Product, Settings, User } from '../domain/types';
+import { PERMISSIONS, type AuditEntry, type Category, type City, type Deal, type Order, type OrderStatus, type Permission, type Product, type Settings, type StaffRole, type User } from '../domain/types';
 
 export interface Db {
   version: number;
@@ -10,6 +10,8 @@ export interface Db {
   cities: City[];
   deals: Deal[];
   users: User[];
+  roles: StaffRole[];
+  categories: Category[];
   orders: Order[];
   audit: AuditEntry[];
   invoiceSeq: Record<string, number>; // per Rome year (INV-01)
@@ -17,9 +19,29 @@ export interface Db {
   orderSeq: number;
 }
 
-export const DB_VERSION = 4; // v4: product details (description, photo, best-before, brand, origin, EAN)
+export const DB_VERSION = 5; // v5: staff roles and permissions, managed categories
 
 const L = (en: string, it: string) => ({ en, it });
+
+const all = [...PERMISSIONS];
+const except = (...no: Permission[]) => all.filter((p) => !no.includes(p));
+
+/** Built-in roles (ROLE-04): can be copied, not deleted. */
+export const seedRoles: StaffRole[] = [
+  { id: 'owner', name: 'Owner', builtIn: true, permissions: all },
+  { id: 'manager', name: 'Manager', builtIn: true, permissions: except('users.manage', 'settings.edit', 'resellers.delete') },
+  { id: 'warehouse', name: 'Warehouse', builtIn: true, permissions: ['orders.view', 'orders.status', 'products.view'] },
+  { id: 'accountant', name: 'Accountant', builtIn: true, permissions: ['orders.view', 'orders.export', 'payments.record', 'resellers.view', 'products.view', 'audit.view'] },
+];
+
+export const seedCategories: Category[] = [
+  { id: 'grain', name: L('Rice & pulses', 'Riso e legumi'), icon: 'wheat', image: null, sort: 0, active: true },
+  { id: 'oil', name: L('Oils', 'Oli'), icon: 'droplet', image: null, sort: 1, active: true },
+  { id: 'spice', name: L('Spices', 'Spezie'), icon: 'leaf', image: null, sort: 2, active: true },
+  { id: 'flour', name: L('Flour', 'Farine'), icon: 'croissant', image: null, sort: 3, active: true },
+  { id: 'canned', name: L('Canned', 'Conserve'), icon: 'package', image: null, sort: 4, active: true },
+  { id: 'drink', name: L('Drinks', 'Bevande'), icon: 'cup-soda', image: null, sort: 5, active: true },
+];
 
 type BaseProduct = Omit<Product, 'description' | 'image' | 'expiryDate' | 'brand' | 'origin' | 'ean'>;
 
@@ -137,7 +159,9 @@ export const seedSettings: Settings = {
 const baseUser = { lang: 'en' as const, password: 'wholesale1', role: 'reseller' as const };
 
 export const seedUsers: User[] = [
-  { ...baseUser, id: 'u-admin', role: 'owner', state: 'approved', fullName: 'Giulia Russo', email: 'admin@afifa.it', mobile: '3331234567', password: 'admin12345', businessName: 'Afifa Distribuzione S.r.l.', address: 'Via Prenestina 410', cityId: 'roma', zoneId: 'roma-cen', vatNumber: 'IT01234567890', fiscalCode: '01234567890', sdiOrPec: 'M5UXCR1', createdAt: '2025-01-10T09:00:00Z' },
+  { ...baseUser, id: 'u-admin', role: 'staff', roleId: 'owner', state: 'approved', fullName: 'Giulia Russo', email: 'admin@afifa.it', mobile: '3331234567', password: 'admin12345', businessName: 'Afifa Distribuzione S.r.l.', address: 'Via Prenestina 410', cityId: 'roma', zoneId: 'roma-cen', vatNumber: 'IT01234567890', fiscalCode: '01234567890', sdiOrPec: 'M5UXCR1', createdAt: '2025-01-10T09:00:00Z' },
+  { ...baseUser, id: 'u-wh', role: 'staff', roleId: 'warehouse', state: 'approved', fullName: 'Luca Bianchi', email: 'magazzino@afifa.it', mobile: '3339876543', password: 'warehouse1', businessName: 'Afifa Distribuzione S.r.l.', address: 'Via Prenestina 410', cityId: 'roma', zoneId: 'roma-cen', vatNumber: '', fiscalCode: '', sdiOrPec: '', createdAt: '2025-02-01T09:00:00Z', lang: 'it' },
+  { ...baseUser, id: 'u-acc', role: 'staff', roleId: 'accountant', state: 'approved', fullName: 'Sara Conti', email: 'contabilita@afifa.it', mobile: '3334567890', password: 'accounts01', businessName: 'Afifa Distribuzione S.r.l.', address: 'Via Prenestina 410', cityId: 'roma', zoneId: 'roma-cen', vatNumber: '', fiscalCode: '', sdiOrPec: '', createdAt: '2025-02-15T09:00:00Z' },
   { ...baseUser, id: 'u-bottega', state: 'approved', fullName: 'Marco De Luca', email: 'ordini@bottegasapori.it', mobile: '3478124590', businessName: 'Bottega Sapori S.r.l.', address: 'Via Casilina 212, 00176 Roma', cityId: 'roma', zoneId: 'roma-tor', vatNumber: 'IT09876543210', fiscalCode: '09876543210', sdiOrPec: 'KRRH6B9', createdAt: '2025-03-02T10:00:00Z', licenceDoc: { name: 'visura_camerale.pdf', size: 1887436, type: 'application/pdf' }, vatDoc: { name: 'certificato_iva.pdf', size: 402113, type: 'application/pdf' } },
   { ...baseUser, id: 'u-esq', state: 'approved', fullName: 'Rahim Hossain', email: 'info@alimentariesquilino.it', mobile: '3285550101', businessName: 'Alimentari Esquilino', address: 'Via Principe Amedeo 88, 00185 Roma', cityId: 'roma', zoneId: 'roma-esq', vatNumber: 'IT11122233344', fiscalCode: '11122233344', sdiOrPec: 'alimentariesquilino@pec.it', createdAt: '2025-04-11T10:00:00Z' },
   { ...baseUser, id: 'u-riso', state: 'approved', fullName: 'Anna Ferri', email: 'ordini@casadelriso.it', mobile: '3401112233', businessName: 'Casa del Riso', address: 'Corso della Repubblica 15, 04100 Latina', cityId: 'latina', zoneId: 'lt-c', vatNumber: 'IT22233344455', fiscalCode: '22233344455', sdiOrPec: 'SUBM70N', createdAt: '2025-05-20T10:00:00Z' },
@@ -268,6 +292,8 @@ export function createSeed(now = new Date()): Db {
   orders.reverse();
   return {
     version: DB_VERSION,
+    roles: structuredClone(seedRoles),
+    categories: structuredClone(seedCategories),
     ...base,
     deals: seedDeals(today),
     users,

@@ -43,3 +43,8 @@ export function useApi<A extends unknown[], R>(fn: (...args: A) => Promise<R>) {
 }
 
 export { api };
+
+export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn: api.categories });
+export const useRoles = () => useQuery({ queryKey: ['admin', 'roles'], queryFn: api.roles });
+export const useStaffUsers = () => useQuery({ queryKey: ['admin', 'staff'], queryFn: api.staffUsers });
+export const useReseller = (id: string) => useQuery({ queryKey: ['admin', 'reseller', id], queryFn: () => api.reseller(id), enabled: !!id });

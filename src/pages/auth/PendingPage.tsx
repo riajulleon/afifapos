@@ -8,6 +8,7 @@ import { api, queryClient, useApi, useMe } from '../../api/queries';
 import { Button, ErrorNote, Field } from '../../components/ui';
 import { formatRome } from '../../domain/romeTime';
 import { useDocumentTitle, useLang } from '../../lib/hooks';
+import { putFile } from '../../lib/fileStore';
 import { rules, UPLOAD_ACCEPT } from '../../lib/validate';
 import { AuthLayout } from '../../layouts/AuthLayout';
 
@@ -64,8 +65,8 @@ export function PendingPage() {
                 if (bad) return setFileErr(bad);
                 if (!licence && !vatDoc) return setFileErr('v.fileRequired');
                 await resubmit.mutateAsync([{
-                  licenceDoc: licence ? { name: licence.name, size: licence.size, type: licence.type } : undefined,
-                  vatDoc: vatDoc ? { name: vatDoc.name, size: vatDoc.size, type: vatDoc.type } : undefined,
+                  licenceDoc: licence ? { name: licence.name, size: licence.size, type: licence.type, fileId: await putFile(licence), uploadedBy: 'applicant' } : undefined,
+                  vatDoc: vatDoc ? { name: vatDoc.name, size: vatDoc.size, type: vatDoc.type, fileId: await putFile(vatDoc), uploadedBy: 'applicant' } : undefined,
                 }]);
                 await queryClient.invalidateQueries({ queryKey: ['me'] });
               }}

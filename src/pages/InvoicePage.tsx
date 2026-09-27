@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useMe, useOrder, useSellerDetails } from '../api/queries';
 import { ApiErrorMessage } from '../components/ApiErrorMessage';
+import { Barcode } from '../components/Barcode';
 import { Brand } from '../components/Brand';
 import { PaymentPill } from '../components/orderBits';
 import { Button, ErrorNote, Skeleton } from '../components/ui';
@@ -69,6 +70,7 @@ export function InvoicePage() {
             <p className="num text-base font-medium">{o.invoiceNumber}</p>
             <p className="text-[#666]">{t('invoice.date', { lng: lang })}: {formatRome(o.placedAt, lang, false)}</p>
             <p className="text-[#666]">{t('order.number', { lng: lang })}: <span className="num">{o.number}</span></p>
+            <Barcode value={o.number} className="mt-1 h-[15mm] w-auto" />
           </div>
         </header>
 

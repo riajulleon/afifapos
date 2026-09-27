@@ -8,6 +8,7 @@ import { api, queryClient, useCities } from '../../api/queries';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { Button, ErrorNote, Field, Input, Select } from '../../components/ui';
 import { useDocumentTitle } from '../../lib/hooks';
+import { putFile } from '../../lib/fileStore';
 import { formatBytes, normalizeMobile, rules, UPLOAD_ACCEPT } from '../../lib/validate';
 import { AuthLayout } from '../../layouts/AuthLayout';
 import { usePrefs } from '../../store/prefs';
@@ -121,8 +122,8 @@ export function ApplyPage() {
         mobile: normalizeMobile(f.mobile),
         vatNumber: f.vatNumber.replace(/\s/g, '').toUpperCase(),
         fiscalCode: f.fiscalCode.replace(/\s/g, '').toUpperCase(),
-        licenceDoc: { name: licence!.name, size: licence!.size, type: licence!.type },
-        vatDoc: { name: vatDoc!.name, size: vatDoc!.size, type: vatDoc!.type },
+        licenceDoc: { name: licence!.name, size: licence!.size, type: licence!.type, fileId: await putFile(licence!), uploadedBy: 'applicant' },
+        vatDoc: { name: vatDoc!.name, size: vatDoc!.size, type: vatDoc!.type, fileId: await putFile(vatDoc!), uploadedBy: 'applicant' },
         lang,
       });
       queryClient.clear();

@@ -4,8 +4,9 @@ import { eur } from '../domain/money';
 import { DEFAULT_BANDS, dealAllowance, fitTiers, isDealLive, liveDealFor, minQty, orderTotals, resolveMinimum, resolveShipping, unitPrice, validateBands } from '../domain/pricing';
 import { addDays, romeDateKey } from '../domain/romeTime';
 import type {
-  AccountState, City, Deal, Lang, Order, OrderLine, OrderStatus, PaymentInput, PaymentRecord, PaymentStatus, Product, Settings, UploadedDoc, User, Zone,
+  AccountState, Category, City, Deal, Permission, StaffRole, Lang, Order, OrderLine, OrderStatus, PaymentInput, PaymentRecord, PaymentStatus, Product, Settings, UploadedDoc, User, Zone,
 } from '../domain/types';
+import { normalizeMobile, rules } from '../lib/validate';
 import { createSeed, DB_VERSION, seedSettings, type Db } from '../mock/seed';
 
 const DB_KEY = 'afifa-mockdb';
@@ -107,9 +108,29 @@ function requireApproved(): User {
   return u;
 }
 
-function requireAdmin(): User {
+/** Permissions of a user: resellers have none; staff get their role's (ROLE). */
+function permissionsOf(u: User): Permission[] {
+  if (u.role !== 'staff') return [];
+  return db.roles.find((r) => r.id === u.roleId)?.permissions ?? [];
+}
+
+function withPerms(u: User): User {
+  const out = clone(u);
+  if (u.role === 'staff') out.permissions = permissionsOf(u);
+  delete (out as Partial<User>).password;
+  return out;
+}
+
+function requireStaff(): User {
   const u = requireUser();
-  if (u.role === 'reseller') throw new ApiError('forbidden');
+  if (u.role !== 'staff') throw new ApiError('forbidden');
+  return u;
+}
+
+/** Every admin endpoint checks one permission on the server; hiding menu items is only a convenience (USR-06). */
+function requirePerm(p: Permission): User {
+  const u = requireStaff();
+  if (!permissionsOf(u).includes(p)) throw new ApiError('no_permission');
   return u;
 }
 
@@ -132,7 +153,7 @@ export async function login(identifier: string, password: string): Promise<User>
   if (user.state === 'suspended') throw new ApiError('suspended');
   failed.delete(id);
   localStorage.setItem(SESSION_KEY, user.id);
-  return clone(user);
+  return withPerms(user);
 }
 
 export async function logout() {
@@ -141,7 +162,7 @@ export async function logout() {
 
 export async function me(): Promise<User | null> {
   const u = sessionUser();
-  return u ? clone(u) : null;
+  return u ? withPerms(u) : null;
 }
 
 export async function setMyLang(lang: Lang) {
@@ -346,7 +367,7 @@ export async function order(id: string): Promise<Order> {
   await latency();
   const u = requireUser();
   const o = db.orders.find((x) => x.id === id);
-  if (!o || (u.role === 'reseller' && o.userId !== u.id)) throw new ApiError('not_found'); // INV-05
+  if (!o || (u.role === 'reseller' && o.userId !== u.id) || (u.role === 'staff' && !permissionsOf(u).includes('orders.view'))) throw new ApiError('not_found'); // INV-05
   return clone(o);
 }
 
@@ -359,7 +380,7 @@ export async function sellerDetails() {
 
 export async function adminOrders(): Promise<Order[]> {
   await latency();
-  requireAdmin();
+  requirePerm('orders.view');
   return clone(db.orders);
 }
 
@@ -367,7 +388,7 @@ const FLOW: OrderStatus[] = ['received', 'confirmed', 'shipped', 'delivered'];
 
 export async function setOrderStatus(id: string, status: OrderStatus) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm(status === 'cancelled' ? 'orders.cancel' : 'orders.status');
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
   const pm = db.settings.paymentMethods.find((m) => m.id === o.paymentMethodId);
@@ -385,7 +406,7 @@ const statusFor = (o: Order): PaymentStatus => { const paid = paidSoFar(o); retu
 /** Records money received and issues the next receipt number (emailed to the buyer in Phase 3). */
 export async function markPaid(id: string, p: PaymentInput): Promise<PaymentRecord> {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('payments.record');
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
   if (!p.reference.trim()) throw new ApiError('reference_required');
@@ -411,7 +432,7 @@ export interface OrderEdit {
 /** Admin edit before shipping: lines, prices, shipping fee, payment method. Re-totals VAT and restocks the difference. */
 export async function editOrder(id: string, edit: OrderEdit): Promise<Order> {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('orders.edit');
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
   if (o.status !== 'received' && o.status !== 'confirmed') throw new ApiError('not_editable');
@@ -475,7 +496,7 @@ export async function editOrder(id: string, edit: OrderEdit): Promise<Order> {
 
 export async function resendInvoice(id: string) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('orders.edit');
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
   o.emailSentAt = new Date().toISOString();
@@ -485,19 +506,19 @@ export async function resendInvoice(id: string) {
 
 export async function applications(): Promise<User[]> {
   await latency();
-  requireAdmin();
+  requirePerm('resellers.view');
   return clone(db.users.filter((u) => u.role === 'reseller' && (u.state === 'pending' || u.state === 'info_requested')));
 }
 
 export async function resellers(): Promise<User[]> {
   await latency();
-  requireAdmin();
-  return clone(db.users.filter((u) => u.role === 'reseller'));
+  requirePerm('resellers.view');
+  return clone(db.users.filter((u) => u.role === 'reseller').map(withPerms));
 }
 
 export async function review(userId: string, decision: 'approve' | 'reject' | 'info', note = '') {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('resellers.approve');
   const u = db.users.find((x) => x.id === userId);
   if (!u) throw new ApiError('not_found');
   u.state = decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : 'info_requested';
@@ -507,13 +528,13 @@ export async function review(userId: string, decision: 'approve' | 'reject' | 'i
 }
 
 export async function adminSettings(): Promise<Settings> {
-  requireAdmin();
+  requireStaff();
   return clone(db.settings);
 }
 
 export async function updateSettings(patch: Partial<Settings>, what: string) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm(patch.globalMinOrderCents !== undefined ? 'rules.edit' : patch.saleBanner ? 'deals.edit' : 'settings.edit');
   if (patch.pricing) {
     const bad = validateBands(patch.pricing);
     if (bad) throw new ApiError(bad);
@@ -526,13 +547,13 @@ export async function updateSettings(patch: Partial<Settings>, what: string) {
 }
 
 export async function adminCities(): Promise<City[]> {
-  requireAdmin();
+  requireStaff();
   return clone(db.cities);
 }
 
 export async function saveCities(next: City[], what: string) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('rules.edit');
   db.cities = clone(next);
   audit(admin, what);
   commit();
@@ -540,13 +561,13 @@ export async function saveCities(next: City[], what: string) {
 
 export async function adminProducts(): Promise<Product[]> {
   await latency();
-  requireAdmin();
+  requirePerm('products.view');
   return clone(db.products);
 }
 
 export async function updateProduct(id: string, patch: Partial<Product>, what: string) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('products.edit');
   const p = db.products.find((x) => x.id === id);
   if (!p) throw new ApiError('not_found');
   const next = { ...p, ...patch };
@@ -560,13 +581,13 @@ export async function updateProduct(id: string, patch: Partial<Product>, what: s
 
 export async function allDeals(): Promise<Deal[]> {
   await latency();
-  requireAdmin();
+  requireStaff();
   return clone(db.deals);
 }
 
 export async function saveDeal(deal: Deal) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('deals.edit');
   const p = db.products.find((x) => x.id === deal.productId);
   if (!p) throw new ApiError('not_found');
   if (deal.priceCents >= p.tiers[0]) throw new ApiError('deal_price_high'); // DEAL-03
@@ -583,7 +604,7 @@ export async function saveDeal(deal: Deal) {
 
 export async function cancelDeal(id: string) {
   await latency();
-  const admin = requireAdmin();
+  const admin = requirePerm('deals.edit');
   const d = db.deals.find((x) => x.id === id);
   if (!d) throw new ApiError('not_found');
   d.cancelled = true;
@@ -593,8 +614,292 @@ export async function cancelDeal(id: string) {
 
 export async function auditLog() {
   await latency();
-  requireAdmin();
+  requirePerm('audit.view');
   return clone(db.audit.slice(0, 200));
+}
+
+/* ---------- categories (CAT) ---------- */
+
+export async function categories(): Promise<Category[]> {
+  const u = requireUser();
+  const list = [...db.categories].sort((a, b) => a.sort - b.sort);
+  return clone(u.role === 'staff' ? list : list.filter((c) => c.active));
+}
+
+export async function saveCategory(cat: Category) {
+  await latency();
+  const admin = requirePerm('categories.edit');
+  if (!cat.name.en.trim() || !cat.name.it.trim()) throw new ApiError('category_invalid');
+  const i = db.categories.findIndex((c) => c.id === cat.id);
+  if (i >= 0) db.categories[i] = clone(cat);
+  else db.categories.push({ ...clone(cat), id: uid('cat'), sort: db.categories.length });
+  audit(admin, `${i >= 0 ? 'Edited' : 'Added'} category ${cat.name.en}`);
+  commit();
+}
+
+export async function reorderCategories(ids: string[]) {
+  await latency();
+  const admin = requirePerm('categories.edit');
+  ids.forEach((id, i) => { const c = db.categories.find((x) => x.id === id); if (c) c.sort = i; });
+  audit(admin, 'Reordered categories');
+  commit();
+}
+
+/** CAT-03: a category with products can only be deleted by moving its products to another one. */
+export async function deleteCategory(id: string, moveTo?: string) {
+  await latency();
+  const admin = requirePerm('categories.edit');
+  const c = db.categories.find((x) => x.id === id);
+  if (!c) throw new ApiError('not_found');
+  const inUse = db.products.filter((p) => p.category === id);
+  if (inUse.length && !moveTo) throw new ApiError('category_not_empty', { n: inUse.length });
+  const target = moveTo ? db.categories.find((x) => x.id === moveTo && x.id !== id) : undefined;
+  if (inUse.length && !target) throw new ApiError('not_found');
+  inUse.forEach((p) => { p.category = target!.id; });
+  db.categories = db.categories.filter((x) => x.id !== id);
+  audit(admin, `Deleted category ${c.name.en}${inUse.length ? `, moved ${inUse.length} products to ${target!.name.en}` : ''}`);
+  commit();
+}
+
+/* ---------- staff users and roles (USR, ROLE) ---------- */
+
+export async function roles(): Promise<StaffRole[]> {
+  requireStaff();
+  return clone(db.roles);
+}
+
+export async function saveRole(role: StaffRole) {
+  await latency();
+  const admin = requirePerm('users.manage');
+  if (!role.name.trim()) throw new ApiError('role_invalid');
+  const i = db.roles.findIndex((r) => r.id === role.id);
+  if (i >= 0 && db.roles[i].builtIn) throw new ApiError('role_builtin');
+  const before = i >= 0 ? db.roles[i].permissions : [];
+  const next = { ...clone(role), builtIn: false, permissions: [...new Set(role.permissions)] };
+  if (i >= 0) db.roles[i] = next;
+  else db.roles.push({ ...next, id: uid('role') });
+  const added = next.permissions.filter((p) => !before.includes(p));
+  const removed = before.filter((p) => !next.permissions.includes(p));
+  audit(admin, `${i >= 0 ? 'Edited' : 'Created'} role ${role.name}${added.length ? `; added ${added.join(', ')}` : ''}${removed.length ? `; removed ${removed.join(', ')}` : ''}`);
+  commit();
+}
+
+export async function deleteRole(id: string) {
+  await latency();
+  const admin = requirePerm('users.manage');
+  const r = db.roles.find((x) => x.id === id);
+  if (!r) throw new ApiError('not_found');
+  if (r.builtIn) throw new ApiError('role_builtin');
+  const users = db.users.filter((u) => u.roleId === id).length;
+  if (users) throw new ApiError('role_in_use', { n: users });
+  db.roles = db.roles.filter((x) => x.id !== id);
+  audit(admin, `Deleted role ${r.name}`);
+  commit();
+}
+
+export async function staffUsers(): Promise<User[]> {
+  await latency();
+  requirePerm('users.manage');
+  return db.users.filter((u) => u.role === 'staff').map(withPerms);
+}
+
+export interface StaffInput { id?: string; fullName: string; email: string; mobile: string; roleId: string; lang: Lang; password?: string }
+
+const activeOwners = () => db.users.filter((u) => u.role === 'staff' && u.roleId === 'owner' && u.state === 'approved');
+
+export async function saveStaffUser(input: StaffInput) {
+  await latency();
+  const admin = requirePerm('users.manage');
+  const email = input.email.trim().toLowerCase();
+  if (!input.fullName.trim() || rules.email(email) || !db.roles.some((r) => r.id === input.roleId)) throw new ApiError('user_invalid');
+  if (db.users.some((u) => u.id !== input.id && u.email.toLowerCase() === email)) throw new ApiError('email_taken');
+  const mobile = normalizeMobile(input.mobile);
+  if (mobile && db.users.some((u) => u.id !== input.id && u.mobile === mobile)) throw new ApiError('mobile_taken');
+  const existing = db.users.find((u) => u.id === input.id && u.role === 'staff');
+  if (existing) {
+    if (existing.roleId === 'owner' && input.roleId !== 'owner' && activeOwners().length <= 1) throw new ApiError('last_owner');
+    const from = db.roles.find((r) => r.id === existing.roleId)?.name;
+    Object.assign(existing, { fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang });
+    if (input.password) existing.password = input.password;
+    audit(admin, `Edited staff user ${existing.fullName}${from !== db.roles.find((r) => r.id === input.roleId)?.name ? ` (role ${from} → ${db.roles.find((r) => r.id === input.roleId)?.name})` : ''}`);
+  } else {
+    if (!input.password || rules.password(input.password)) throw new ApiError('user_invalid');
+    const base = db.users.find((u) => u.id === admin.id)!;
+    db.users.push({ ...clone(base), id: uid('u'), role: 'staff', state: 'approved', fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang, password: input.password, createdAt: new Date().toISOString(), licenceDoc: undefined, vatDoc: undefined, extraDocs: undefined, reviewNote: undefined });
+    audit(admin, `Created staff user ${input.fullName.trim()} (${db.roles.find((r) => r.id === input.roleId)?.name})`);
+  }
+  commit();
+}
+
+export async function setStaffActive(id: string, active: boolean) {
+  await latency();
+  const admin = requirePerm('users.manage');
+  const u = db.users.find((x) => x.id === id && x.role === 'staff');
+  if (!u) throw new ApiError('not_found');
+  if (!active && u.roleId === 'owner' && activeOwners().length <= 1) throw new ApiError('last_owner');
+  if (!active && u.id === admin.id) throw new ApiError('not_yourself');
+  u.state = active ? 'approved' : 'suspended';
+  audit(admin, `${active ? 'Reactivated' : 'Deactivated'} staff user ${u.fullName}`);
+  commit();
+}
+
+/** USR-03: only users who never did anything can be deleted; everyone else is deactivated. */
+export async function deleteStaffUser(id: string) {
+  await latency();
+  const admin = requirePerm('users.manage');
+  const u = db.users.find((x) => x.id === id && x.role === 'staff');
+  if (!u) throw new ApiError('not_found');
+  if (u.id === admin.id) throw new ApiError('not_yourself');
+  if (db.audit.some((a) => a.actor === u.fullName)) throw new ApiError('user_has_history');
+  db.users = db.users.filter((x) => x.id !== id);
+  audit(admin, `Deleted staff user ${u.fullName}`);
+  commit();
+}
+
+/* ---------- reseller management (RES, APR) ---------- */
+
+export interface ResellerInput {
+  fullName: string; businessName: string; address: string; cityId: string; zoneId: string;
+  email: string; mobile: string; vatNumber: string; fiscalCode: string; sdiOrPec: string; lang: Lang;
+}
+
+/** Returns an error code for the first invalid field, or null. Same rules as the application form. */
+function checkReseller(r: ResellerInput, exceptId?: string): { code: string; field?: string } | null {
+  const req: (keyof ResellerInput)[] = ['fullName', 'businessName', 'address', 'cityId', 'zoneId'];
+  for (const k of req) if (!String(r[k] ?? '').trim()) return { code: 'field_required', field: k };
+  if (rules.email(r.email)) return { code: 'field_invalid', field: 'email' };
+  if (rules.mobile(r.mobile)) return { code: 'field_invalid', field: 'mobile' };
+  if (rules.vatNumber(r.vatNumber)) return { code: 'field_invalid', field: 'vatNumber' };
+  if (rules.fiscalCode(r.fiscalCode)) return { code: 'field_invalid', field: 'fiscalCode' };
+  if (rules.sdiOrPec(r.sdiOrPec)) return { code: 'field_invalid', field: 'sdiOrPec' };
+  const city = db.cities.find((c) => c.id === r.cityId);
+  if (!city || !city.zones.some((z) => z.id === r.zoneId)) return { code: 'field_invalid', field: 'zoneId' };
+  const email = r.email.trim().toLowerCase();
+  if (db.users.some((u) => u.id !== exceptId && u.email.toLowerCase() === email)) return { code: 'email_taken' };
+  if (db.users.some((u) => u.id !== exceptId && u.mobile === normalizeMobile(r.mobile))) return { code: 'mobile_taken' };
+  const vat = r.vatNumber.replace(/\s/g, '').toUpperCase();
+  if (db.users.some((u) => u.id !== exceptId && u.role === 'reseller' && u.vatNumber.toUpperCase() === vat)) return { code: 'vat_taken' };
+  return null;
+}
+
+const cleanReseller = (r: ResellerInput) => ({
+  ...r,
+  fullName: r.fullName.trim(), businessName: r.businessName.trim(), address: r.address.trim(),
+  email: r.email.trim().toLowerCase(), mobile: normalizeMobile(r.mobile),
+  vatNumber: r.vatNumber.replace(/\s/g, '').toUpperCase(), fiscalCode: r.fiscalCode.replace(/\s/g, '').toUpperCase(), sdiOrPec: r.sdiOrPec.trim(),
+});
+
+export async function reseller(id: string): Promise<User> {
+  await latency();
+  requirePerm('resellers.view');
+  const u = db.users.find((x) => x.id === id && x.role === 'reseller');
+  if (!u) throw new ApiError('not_found');
+  return withPerms(u);
+}
+
+/** Admin-created resellers start Approved (RES table in the spec). The mock sets a temporary password; production emails a set-password link. */
+export async function createReseller(input: ResellerInput, password: string): Promise<User> {
+  await latency();
+  const admin = requirePerm('resellers.create');
+  const bad = checkReseller(input);
+  if (bad) throw new ApiError(bad.code, { field: bad.field ?? '' });
+  if (rules.password(password)) throw new ApiError('field_invalid', { field: 'password' });
+  const u: User = { ...cleanReseller(input), id: uid('u'), role: 'reseller', state: 'approved', password, createdAt: new Date().toISOString() };
+  db.users.push(u);
+  audit(admin, `Created reseller ${u.businessName}`);
+  commit();
+  return withPerms(u);
+}
+
+/** APR-01 / RES edit: every field; the audit log keeps before → after. */
+export async function updateReseller(id: string, input: ResellerInput) {
+  await latency();
+  const admin = requirePerm('resellers.edit');
+  const u = db.users.find((x) => x.id === id && x.role === 'reseller');
+  if (!u) throw new ApiError('not_found');
+  const bad = checkReseller(input, id);
+  if (bad) throw new ApiError(bad.code, { field: bad.field ?? '' });
+  const next = cleanReseller(input);
+  const changes = (Object.keys(next) as (keyof ResellerInput)[]).filter((k) => String(u[k]) !== String(next[k])).map((k) => `${k} “${u[k]}” → “${next[k]}”`);
+  Object.assign(u, next);
+  audit(admin, `Edited ${u.state === 'approved' ? 'reseller' : 'application'} ${u.businessName}: ${changes.join('; ') || 'no changes'}`);
+  commit();
+}
+
+export async function setResellerActive(id: string, active: boolean) {
+  await latency();
+  const admin = requirePerm('resellers.edit');
+  const u = db.users.find((x) => x.id === id && x.role === 'reseller');
+  if (!u) throw new ApiError('not_found');
+  u.state = active ? 'approved' : 'suspended';
+  audit(admin, `${active ? 'Reactivated' : 'Deactivated'} reseller ${u.businessName}`);
+  commit();
+}
+
+/** Delete is only for resellers without orders; others are deactivated (RES table). */
+export async function deleteReseller(id: string) {
+  await latency();
+  const admin = requirePerm('resellers.delete');
+  const u = db.users.find((x) => x.id === id && x.role === 'reseller');
+  if (!u) throw new ApiError('not_found');
+  if (db.orders.some((o) => o.userId === id)) throw new ApiError('reseller_has_orders');
+  db.users = db.users.filter((x) => x.id !== id);
+  audit(admin, `Deleted reseller ${u.businessName}`);
+  commit();
+}
+
+export async function addResellerDoc(id: string, doc: UploadedDoc) {
+  await latency();
+  const admin = requirePerm('resellers.edit');
+  const u = db.users.find((x) => x.id === id && x.role === 'reseller');
+  if (!u) throw new ApiError('not_found');
+  u.extraDocs = [...(u.extraDocs ?? []), { ...doc, uploadedBy: 'admin', uploadedAt: new Date().toISOString() }];
+  audit(admin, `Uploaded ${doc.name} for ${u.businessName}`);
+  commit();
+}
+
+export interface ImportRowResult { row: number; status: 'ready' | 'warning' | 'error'; message: string; input: ResellerInput }
+
+/**
+ * RES-02: dry run returns a status per row and saves nothing; commit creates only the rows without errors.
+ * An unknown zone falls back to the city's first zone as a warning.
+ */
+export async function importResellers(rows: ResellerInput[], opts: { commit: boolean; state: 'approved' | 'pending' }): Promise<ImportRowResult[]> {
+  await latency();
+  const admin = requirePerm('resellers.import');
+  if (rows.length > 2000) throw new ApiError('import_too_big');
+  const seenEmail = new Set<string>();
+  const seenVat = new Set<string>();
+  const results: ImportRowResult[] = rows.map((raw, i) => {
+    const r = { ...raw };
+    const city = db.cities.find((c) => c.id === r.cityId || c.name.toLowerCase() === String(r.cityId).trim().toLowerCase());
+    let warning = '';
+    if (city) {
+      r.cityId = city.id;
+      const zone = city.zones.find((z) => z.id === r.zoneId || z.name.toLowerCase() === String(r.zoneId).trim().toLowerCase());
+      if (zone) r.zoneId = zone.id;
+      else { r.zoneId = city.zones[0]?.id ?? ''; warning = `zone “${raw.zoneId}” not found, used ${city.zones[0]?.name}`; }
+    }
+    const bad = checkReseller(r);
+    const email = r.email.trim().toLowerCase();
+    const vat = r.vatNumber.replace(/\s/g, '').toUpperCase();
+    const dup = seenEmail.has(email) ? 'email repeated in this file' : seenVat.has(vat) ? 'Partita IVA repeated in this file' : '';
+    seenEmail.add(email);
+    seenVat.add(vat);
+    if (!city) return { row: i + 2, status: 'error', message: `city “${raw.cityId}” not found`, input: r };
+    if (bad) return { row: i + 2, status: 'error', message: bad.field ? `${bad.code === 'field_required' ? 'missing' : 'invalid'} ${bad.field}` : bad.code.replace('_', ' '), input: r };
+    if (dup) return { row: i + 2, status: 'error', message: dup, input: r };
+    return { row: i + 2, status: warning ? 'warning' : 'ready', message: warning, input: r };
+  });
+  if (opts.commit) {
+    const ok = results.filter((r) => r.status !== 'error');
+    for (const r of ok) {
+      db.users.push({ ...cleanReseller(r.input), id: uid('u'), role: 'reseller', state: opts.state, password: Math.random().toString(36).slice(2, 14), createdAt: new Date().toISOString() });
+    }
+    audit(admin, `Imported ${ok.length} resellers as ${opts.state} (${results.length - ok.length} rows skipped)`);
+    commit();
+  }
+  return results;
 }
 
 export async function resetDemo() {

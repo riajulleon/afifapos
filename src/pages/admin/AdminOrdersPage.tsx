@@ -1,14 +1,18 @@
-import { Download, Search } from 'lucide-react';
+import clsx from 'clsx';
+import { Download, ScanLine } from 'lucide-react';
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Link, useSearchParams } from 'react-router';
+import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useAdminCities, useAdminOrders } from '../../api/queries';
 import { FLOW, PaymentPill, StatusPill } from '../../components/orderBits';
-import { Button, EmptyState, PageHeader, Select, Skeleton } from '../../components/ui';
+import { Button, EmptyState, Input, PageHeader, Select, Skeleton } from '../../components/ui';
 import { eur } from '../../domain/money';
-import { formatRome } from '../../domain/romeTime';
+import { addDays, formatRome, romeDateKey } from '../../domain/romeTime';
+import { compact } from '../../lib/text';
 import { downloadCsv } from '../../lib/csv';
-import { useDocumentTitle, useLang } from '../../lib/hooks';
+import { useCan, useDocumentTitle, useLang } from '../../lib/hooks';
+
+const PRESETS = ['all', 'today', '7', '30', '90', 'custom'] as const;
 
 export function AdminOrdersPage() {
   const { t } = useTranslation();
@@ -21,6 +25,12 @@ export function AdminOrdersPage() {
   const pay = params.get('pay') ?? '';
   const city = params.get('city') ?? '';
   const q = params.get('q') ?? '';
+  const range = (params.get('range') ?? 'all') as (typeof PRESETS)[number];
+  const today = romeDateKey();
+  const from = range === 'custom' ? params.get('from') ?? '' : range === 'today' ? today : range === 'all' ? '' : addDays(today, -(Number(range) - 1));
+  const to = range === 'custom' ? params.get('to') ?? '' : range === 'all' ? '' : today;
+  const navigate = useNavigate();
+  const can = useCan();
   const set = (k: string, v: string) => {
     const n = new URLSearchParams(params);
     if (v) n.set(k, v); else n.delete(k);
@@ -34,9 +44,11 @@ export function AdminOrdersPage() {
           (!status || o.status === status) &&
           (!pay || o.paymentStatus === pay) &&
           (!city || o.cityId === city) &&
-          (!q || `${o.number} ${o.businessName} ${o.invoiceNumber}`.toLowerCase().includes(q.toLowerCase())),
+          (!from || o.romeDate >= from) &&
+          (!to || o.romeDate <= to) &&
+          (!q || compact([o.number, o.invoiceNumber, o.businessName, ...o.payments.map((p) => p.receiptNumber)].join(' ')).includes(compact(q))),
       ),
-    [orders.data, status, pay, city, q],
+    [orders.data, status, pay, city, q, from, to],
   );
 
   const exportCsv = () =>
@@ -50,12 +62,36 @@ export function AdminOrdersPage() {
 
   return (
     <div className="grid gap-5">
-      <PageHeader title={t('admin.nav.orders')} sub={t('admin.ordersSub', { count: list.length })} actions={<Button variant="ghost" onClick={exportCsv}><Download className="size-4" /> {t('admin.exportCsv')}</Button>} />
+      <PageHeader title={t('admin.nav.orders')} sub={t('admin.ordersSub', { count: list.length })} actions={can('orders.export') && <Button variant="ghost" onClick={exportCsv}><Download className="size-4" /> {t('admin.exportCsv')}</Button>} />
+      <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('orders2.range')}>
+        {PRESETS.map((p) => (
+          <button key={p} type="button" aria-pressed={range === p} onClick={() => set('range', p === 'all' ? '' : p)} className={clsx('h-8 rounded-full border px-3.5 text-[13px] transition-colors', range === p ? 'border-primary bg-primary text-primary-ink' : 'border-line-strong bg-surface hover:bg-surface-2')}>
+            {t(`orders2.preset.${p}`)}
+          </button>
+        ))}
+        {range === 'custom' && (
+          <span className="flex flex-wrap items-center gap-2 text-[13px]">
+            <Input type="date" value={from} max={to || undefined} onChange={(e) => set('from', e.target.value)} className="!h-8 w-40" aria-label={t('orders2.from')} />
+            <span className="text-muted">→</span>
+            <Input type="date" value={to} min={from || undefined} onChange={(e) => set('to', e.target.value)} className="!h-8 w-40" aria-label={t('orders2.to')} />
+          </span>
+        )}
+      </div>
       <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-[1.4fr_1fr_1fr_1fr]">
-        <label className="flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 focus-within:border-fg">
-          <Search className="size-4 text-muted" />
-          <input value={q} onChange={(e) => set('q', e.target.value)} placeholder={t('admin.searchOrders')} aria-label={t('admin.searchOrders')} className="w-full bg-transparent text-sm outline-none" />
-        </label>
+        <form
+          className="flex h-10 items-center gap-2 rounded-lg border border-line-strong bg-surface px-3 focus-within:border-fg"
+          onSubmit={(e) => {
+            e.preventDefault();
+            // A scanner types the code and presses Enter: an exact order number opens the order (ORD-03).
+            // Read the field itself: a scanner presses Enter before React has re-rendered with the last character.
+            const typed = String(new FormData(e.currentTarget).get('q') ?? '');
+            const hit = (orders.data ?? []).find((o) => compact(o.number) === compact(typed));
+            if (hit) navigate(`/admin/orders/${hit.id}`);
+          }}
+        >
+          <ScanLine className="size-4 shrink-0 text-muted" aria-hidden />
+          <input name="q" value={q} onChange={(e) => set('q', e.target.value)} placeholder={t('orders2.search')} aria-label={t('orders2.search')} className="w-full bg-transparent text-sm outline-none" />
+        </form>
         <Select value={status} onChange={(e) => set('status', e.target.value)} aria-label={t('order.status')}>
           <option value="">{t('admin.anyStatus')}</option>
           {[...FLOW, 'cancelled'].map((s) => <option key={s} value={s}>{t(`status.${s}`)}</option>)}
