@@ -58,7 +58,7 @@ export function simulateDelivery(settings: Settings, to: string, at: Date): Pick
   if (/\.(invalid|test)$/i.test(to) || /bounce/i.test(to)) {
     return { status: 'bounced', error: '550 5.1.1 Recipient address rejected: mailbox unavailable', events: [{ status: 'queued', at: t(0) }, { status: 'sent', at: t(900), detail: `${smtp.host}:${smtp.port}` }, { status: 'bounced', at: t(4200), detail: '550 5.1.1' }] };
   }
-  return { status: 'delivered', events: [{ status: 'queued', at: t(0) }, { status: 'sent', at: t(900), detail: `${smtp.host}:${smtp.port}` }, { status: 'delivered', at: t(2600), detail: '250 2.0.0 OK' }] };
+  return { status: 'delivered', events: [{ status: 'queued', at: t(0) }, { status: 'sent', at: t(900), detail: `${smtp.host}:${smtp.port} (simulated)` }, { status: 'delivered', at: t(2600), detail: 'simulated, demo does not send email' }] };
 }
 
 export function makeLog(

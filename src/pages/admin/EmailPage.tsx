@@ -281,6 +281,7 @@ export function EmailPage() {
   return (
     <div className="grid gap-5">
       <PageHeader title={t('mail.title')} sub={t('mail.sub')} />
+      <p role="note" className="rounded-lg border border-warn/30 bg-warn-soft px-3 py-2 text-sm text-warn">{t('mail.demoBanner')}</p>
       <div className="flex flex-wrap gap-1 border-b border-line" role="tablist">
         {TABS.map((x) => (
           <button key={x} role="tab" type="button" aria-selected={tab === x} onClick={() => setParams(x === 'log' ? {} : { tab: x }, { replace: true })} className={clsx('-mb-px h-10 whitespace-nowrap border-b-2 px-3 text-sm transition-colors', tab === x ? 'border-fg font-medium text-fg' : 'border-transparent text-muted hover:text-fg')}>
