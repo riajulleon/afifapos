@@ -16,7 +16,8 @@ const GROUPS: { key: string; perms: Permission[] }[] = [
   { key: 'orders', perms: ['orders.view', 'orders.edit', 'orders.status', 'orders.cancel', 'orders.export', 'payments.record'] },
   { key: 'resellers', perms: ['resellers.view', 'resellers.create', 'resellers.edit', 'resellers.approve', 'resellers.delete', 'resellers.import'] },
   { key: 'catalog', perms: ['products.view', 'products.edit', 'categories.edit', 'deals.edit'] },
-  { key: 'settings', perms: ['rules.edit', 'settings.edit'] },
+  { key: 'sales', perms: ['pos.use', 'pos.discount', 'reports.view', 'commissions.manage'] },
+  { key: 'settings', perms: ['rules.edit', 'settings.edit', 'email.manage'] },
   { key: 'system', perms: ['users.manage', 'audit.view'] },
 ];
 
@@ -25,14 +26,18 @@ const GROUPS: { key: string; perms: Permission[] }[] = [
 function UserForm({ user, roles, onDone }: { user?: User; roles: StaffRole[]; onDone: () => void }) {
   const { t } = useTranslation();
   const save = useApi(api.saveStaffUser);
-  const [f, setF] = useState<StaffInput>({ id: user?.id, fullName: user?.fullName ?? '', email: user?.email ?? '', mobile: user?.mobile ?? '', roleId: user?.roleId ?? 'manager', lang: user?.lang ?? 'it', password: '' });
+  const [f, setF] = useState<StaffInput>({ id: user?.id, fullName: user?.fullName ?? '', email: user?.email ?? '', mobile: user?.mobile ?? '', roleId: user?.roleId ?? 'manager', lang: user?.lang ?? 'it', password: '', commissionPct: user?.commissionPct ?? null });
+  const [rate, setRate] = useState(user?.commissionPct !== undefined ? String(user.commissionPct).replace('.', ',') : '');
+  const rateN = rate.trim() === '' ? null : Number(rate.replace(',', '.'));
+  const rateBad = rateN !== null && !(rateN >= 0 && rateN <= 50);
   const set = <K extends keyof StaffInput>(k: K, v: StaffInput[K]) => setF((x) => ({ ...x, [k]: v }));
   return (
     <form
       className="grid gap-4 rounded-xl border border-line bg-canvas p-4"
       onSubmit={async (e) => {
         e.preventDefault();
-        await save.mutateAsync([{ ...f, password: f.password || undefined }]);
+        if (rateBad) return;
+        await save.mutateAsync([{ ...f, password: f.password || undefined, commissionPct: rateN }]);
         toast({ title: user ? t('staff.saved') : t('staff.created', { name: f.fullName }), tone: 'ok' });
         onDone();
       }}
@@ -54,6 +59,9 @@ function UserForm({ user, roles, onDone }: { user?: User; roles: StaffRole[]; on
         </Field>
         <Field label={user ? t('staff.newPassword') : t('staff.password')} htmlFor="su-pw" hint={t('staff.passwordHint')}>
           <Input id="su-pw" type="password" autoComplete="new-password" value={f.password} onChange={(e) => set('password', e.target.value)} required={!user} minLength={10} />
+        </Field>
+        <Field label={t('team.rateLabel')} htmlFor="su-rate" hint={t('team.rateHint')} error={rateBad ? t('team.rateBad') : undefined}>
+          <Input id="su-rate" inputMode="decimal" value={rate} onChange={(e) => setRate(e.target.value)} placeholder={t('team.rateDefault')} invalid={rateBad} />
         </Field>
       </div>
       {save.error && <ErrorNote><ApiErrorMessage error={save.error} /></ErrorNote>}

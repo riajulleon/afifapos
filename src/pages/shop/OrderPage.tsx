@@ -61,8 +61,14 @@ export function OrderTotals({ order }: { order: Order }) {
   const lang = useLang();
   return (
     <dl className="ml-auto grid w-full max-w-sm gap-1.5 text-sm">
+      {order.discount && (
+        <>
+          <div className="flex justify-between"><dt>{t('pos.items')}</dt><dd className="num">{eur(order.subtotalCents + order.discount.cents, lang)}</dd></div>
+          <div className="flex justify-between"><dt>{t('pos.discount')}{order.discount.kind === 'percent' ? ` ${order.discount.value}%` : ''} <span className="text-muted">· {order.discount.reason}</span></dt><dd className="num">− {eur(order.discount.cents, lang)}</dd></div>
+        </>
+      )}
       <div className="flex justify-between"><dt>{t('cart.subtotal')}</dt><dd className="num">{eur(order.subtotalCents, lang)}</dd></div>
-      <div className="flex justify-between"><dt>{t('cart.shipping', { place: order.zoneName || order.cityName })}</dt><dd className="num">{eur(order.shippingCents, lang)}</dd></div>
+      {(order.shippingCents > 0 || order.channel !== 'pos') && <div className="flex justify-between"><dt>{t('cart.shipping', { place: order.zoneName || order.cityName })}</dt><dd className="num">{eur(order.shippingCents, lang)}</dd></div>}
       {order.vat.map((r) => (
         <div key={r.percent} className="flex justify-between text-muted"><dt>{t('cart.vatRow', { p: r.percent, base: eur(r.baseCents, lang) })}</dt><dd className="num">{eur(r.vatCents, lang)}</dd></div>
       ))}

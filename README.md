@@ -20,7 +20,14 @@ npm run build      # type-check + production build
 | --- | --- | --- |
 | Reseller (Roma › Tor Pignattara) | `ordini@bottegasapori.it` or `347 812 4590` | `wholesale1` |
 | Admin (Owner) | `admin@afifa.it` | `admin12345` |
+| Warehouse | `magazzino@afifa.it` | `warehouse1` |
+| Accountant | `contabilita@afifa.it` | `accounts01` |
+| Sales rep (POS, 3 resellers, 4%) | `davide@afifa.it` | `salesrep01` |
+| Sales rep (2 resellers, 3.5%) | `nusrat@afifa.it` | `salesrep02` |
 | Pending applicant | `minimarket.pigneto@gmail.com` | `wholesale1` |
+
+Phase B added the POS, points of contact with commission and payouts, the reports hub, and email templates, log and
+announcements. Design, schema, API and security notes: [docs/PHASE_B.md](docs/PHASE_B.md).
 
 Admin › Settings › Demo data resets everything. Open the shop and the admin console in two tabs: a new order shows up in the admin tab as a toast, on the bell, and as a browser notification if you allow it.
 

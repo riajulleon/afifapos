@@ -1,4 +1,4 @@
-import { ArrowLeft, Ban, FileText, Mail, Pencil, Plus, Receipt, Trash2 } from 'lucide-react';
+import { ArrowLeft, Ban, FileText, Mail, Pencil, Plus, Receipt, Store, Trash2 } from 'lucide-react';
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router';
@@ -9,7 +9,7 @@ import { FLOW, PaymentPill, StatusPill, TrackingBar } from '../../components/ord
 import { PaymentIcon } from '../../components/PaymentIcon';
 import { Button, Card, ErrorNote, EuroInput, Field, Input, Pill, Select, Skeleton } from '../../components/ui';
 import { eur, parseEuro } from '../../domain/money';
-import { orderTotals, unitPrice } from '../../domain/pricing';
+import { discountAmount, orderTotals, unitPrice } from '../../domain/pricing';
 import { formatRome, romeDateKey } from '../../domain/romeTime';
 import { PAYMENT_KINDS, type Order, type PaymentKind } from '../../domain/types';
 import { useBands, useCan, useDocumentTitle, useLang } from '../../lib/hooks';
@@ -36,7 +36,10 @@ function OrderEditor({ order, onDone }: { order: Order; onDone: () => void }) {
   const vatOf = (id: string) => settings.data!.vatRates.find((v) => v.id === pById.get(id)?.vatRateId)?.percent ?? 22;
   const shipC = parseEuro(ship);
   const bad = lines.some((l) => parseEuro(l.price) === null) || shipC === null || !lines.length;
-  const totals = orderTotals(lines.map((l) => ({ netCents: (parseEuro(l.price) ?? 0) * l.qty, vatPercent: l.vatPercent })), shipC ?? 0);
+  const goods = lines.reduce((a, l) => a + (parseEuro(l.price) ?? 0) * l.qty, 0);
+  // A POS discount stays on the order: a percentage re-applies to the new goods value, a fixed amount is capped by it.
+  const discount = order.discount ? discountAmount(order.discount.kind, order.discount.value, goods) : 0;
+  const totals = orderTotals(lines.map((l) => ({ netCents: (parseEuro(l.price) ?? 0) * l.qty, vatPercent: l.vatPercent })), shipC ?? 0, discount);
   const upd = (i: number, patch: Partial<DraftLine>) => setLines(lines.map((l, j) => (j === i ? { ...l, ...patch } : l)));
   const addable = products.data!.filter((p) => p.active && !lines.some((l) => l.productId === p.id));
 
@@ -112,6 +115,7 @@ function OrderEditor({ order, onDone }: { order: Order; onDone: () => void }) {
       </div>
 
       <dl className="ml-auto grid w-full max-w-sm gap-1.5 rounded-xl border border-line bg-canvas p-4 text-sm">
+        {discount > 0 && <div className="flex justify-between"><dt>{t('pos.discount')} · {order.discount!.reason}</dt><dd className="num">− {eur(discount, lang)}</dd></div>}
         <div className="flex justify-between"><dt>{t('cart.subtotal')}</dt><dd className="num">{eur(totals.subtotalCents, lang)}</dd></div>
         <div className="flex justify-between"><dt>{t('admin.edit.shipping')}</dt><dd className="num">{eur(totals.shippingCents, lang)}</dd></div>
         {totals.vat.map((r) => <div key={r.percent} className="flex justify-between text-muted"><dt>{t('cart.vatRow', { p: r.percent, base: eur(r.baseCents, lang) })}</dt><dd className="num">{eur(r.vatCents, lang)}</dd></div>)}
@@ -186,6 +190,7 @@ export function AdminOrderPage() {
   const [paying, setPaying] = useState(false);
   const [editing, setEditing] = useState(false);
   const [confirmCancel, setConfirmCancel] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
   const can = useCan();
   useDocumentTitle(order.data?.number);
 
@@ -206,8 +211,10 @@ export function AdminOrderPage() {
           <StatusPill status={o.status} />
           <PaymentPill status={o.paymentStatus} />
           {o.editedAt && <Pill tone="muted">{t('admin.edit.edited', { when: formatRome(o.editedAt, lang) })}</Pill>}
+          {o.channel === 'pos' && <Pill tone="info">{t('pos.channelPill', { who: o.cashier ?? '' })}</Pill>}
         </div>
         <div className="flex flex-wrap gap-2">
+          {o.channel === 'pos' && can('pos.use') && <Link to={`/admin/pos/receipt/${o.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><Store className="size-4" /> {t('pos.receipt')}</Link>}
           <Link to={`/invoice/${o.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><FileText className="size-4" /> {t('order.invoice')} {o.invoiceNumber}</Link>
           {o.payments.map((p) => (
             <Link key={p.id} to={`/receipt/${o.id}/${p.id}`} className="inline-flex h-9 items-center gap-2 rounded-lg border border-line-strong bg-surface px-4 text-sm font-medium hover:bg-surface-2"><Receipt className="size-4" /> {t('receipt.short')} {p.receiptNumber}</Link>
@@ -225,9 +232,10 @@ export function AdminOrderPage() {
               {editable && can('orders.edit') && <Button variant="ghost" onClick={() => setEditing(true)}><Pencil className="size-4" /> {t('admin.edit.button')}</Button>}
               {o.status !== 'cancelled' && o.status !== 'delivered' && !confirmCancel && can('orders.cancel') && <Button variant="danger" onClick={() => setConfirmCancel(true)}><Ban className="size-4" /> {t('admin.cancelOrder')}</Button>}
               {confirmCancel && (
-                <span className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="flex w-full flex-wrap items-center gap-2 text-sm">
                   <span className="text-bad">{t('admin.cancelConfirm')}</span>
-                  <Button size="sm" variant="danger" onClick={() => { setStatus.mutate([o.id, 'cancelled']); setConfirmCancel(false); }}>{t('admin.cancelYes')}</Button>
+                  <Input value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} placeholder={t('admin.cancelReason')} className="!h-8 min-w-56 flex-1 text-[13px]" aria-label={t('admin.cancelReason')} maxLength={200} />
+                  <Button size="sm" variant="danger" onClick={() => { setStatus.mutate([o.id, 'cancelled', cancelReason]); setConfirmCancel(false); setCancelReason(''); }}>{t('admin.cancelYes')}</Button>
                   <Button size="sm" variant="quiet" onClick={() => setConfirmCancel(false)}>{t('common.cancel')}</Button>
                 </span>
               )}

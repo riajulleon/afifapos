@@ -3,7 +3,7 @@ import { ArrowDown, ArrowUp, ImagePlus, Plus, RotateCcw, Trash2 } from 'lucide-r
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
-import { api, useAdminSettings, useApi } from '../../api/queries';
+import { api, useAdminCities, useAdminSettings, useApi } from '../../api/queries';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { Button, Card, ErrorNote, Field, Input, PageHeader, Pill, Skeleton } from '../../components/ui';
 import { PAYMENT_KINDS, type Branding, type BusinessDetails, type PaymentKind, type PaymentMethod, type Settings, type VatRate } from '../../domain/types';
@@ -14,7 +14,7 @@ import { toast } from '../../store/toasts';
 import { FooterSettingsTab } from './FooterSettingsTab';
 import { PricingSettingsTab } from './PricingSettingsTab';
 
-type Tab = 'appearance' | 'footer' | 'pricing' | 'payments' | 'tax' | 'business' | 'demo';
+type Tab = 'appearance' | 'footer' | 'pricing' | 'payments' | 'pos' | 'tax' | 'business' | 'demo';
 
 function useSaver() {
   const { t } = useTranslation();
@@ -206,6 +206,33 @@ function Business({ s }: { s: Settings }) {
   );
 }
 
+/* ---------- POS (POS-03, POS-05) ---------- */
+
+function PosTab({ s }: { s: Settings }) {
+  const { t } = useTranslation();
+  const [p, setP] = useState(s.pos);
+  const cities = useAdminCities();
+  const { save, pending, error } = useSaver();
+  const bad = !(p.maxDiscountPct >= 0 && p.maxDiscountPct <= 100);
+  return (
+    <Card className="grid gap-4 p-5">
+      <div className="grid gap-4 md:grid-cols-2">
+        <Field label={t('pos.maxDiscount')} htmlFor="pos-max" hint={t('pos.maxDiscountHint')} error={bad ? t('pos.maxDiscountBad') : undefined}>
+          <Input id="pos-max" inputMode="decimal" value={String(p.maxDiscountPct)} onChange={(e) => setP({ ...p, maxDiscountPct: Number(e.target.value.replace(',', '.')) })} invalid={bad} />
+        </Field>
+        <Field label={t('pos.storeCity')} htmlFor="pos-city" hint={t('pos.storeCityHint')}>
+          <Select id="pos-city" value={p.storeCityId} onChange={(e) => setP({ ...p, storeCityId: e.target.value })}>{(cities.data ?? []).map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}</Select>
+        </Field>
+        {(['en', 'it'] as const).map((l) => (
+          <Field key={l} label={`${t('pos.receiptFooter')} (${l.toUpperCase()})`} htmlFor={`pos-f-${l}`}><Input id={`pos-f-${l}`} value={p.receiptFooter[l]} onChange={(e) => setP({ ...p, receiptFooter: { ...p.receiptFooter, [l]: e.target.value } })} maxLength={160} /></Field>
+        ))}
+      </div>
+      {!!error && <ErrorNote><ApiErrorMessage error={error} /></ErrorNote>}
+      <div><Button disabled={bad} loading={pending} onClick={() => save({ pos: p }, `POS: max discount ${s.pos.maxDiscountPct}% → ${p.maxDiscountPct}%, store city ${p.storeCityId}`)}>{t('common.save')}</Button></div>
+    </Card>
+  );
+}
+
 /* ---------- Demo data ---------- */
 
 function Demo() {
@@ -233,7 +260,7 @@ export function SettingsPage() {
   const settings = useAdminSettings();
   const [params, setParams] = useSearchParams();
   const tab = (params.get('tab') ?? 'appearance') as Tab;
-  const tabs: Tab[] = ['appearance', 'footer', 'pricing', 'payments', 'tax', 'business', 'demo'];
+  const tabs: Tab[] = ['appearance', 'footer', 'pricing', 'payments', 'pos', 'tax', 'business', 'demo'];
   if (settings.isLoading) return <Skeleton className="h-96" />;
   const s = settings.data!;
   const key = JSON.stringify(s);
@@ -251,6 +278,7 @@ export function SettingsPage() {
       {tab === 'footer' && <FooterSettingsTab key={key} s={s} />}
       {tab === 'pricing' && <PricingSettingsTab key={key} s={s} />}
       {tab === 'payments' && <Payments key={key} s={s} />}
+      {tab === 'pos' && <PosTab key={key} s={s} />}
       {tab === 'tax' && <Tax key={key} s={s} />}
       {tab === 'business' && <Business key={key} s={s} />}
       {tab === 'demo' && <Demo />}

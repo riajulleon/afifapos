@@ -1,5 +1,5 @@
 import clsx from 'clsx';
-import { Bell, Boxes, ClipboardList, ExternalLink, Flame, History, KeyRound, LayoutDashboard, LogOut, MapPin, Menu, Settings, Tags, UserCheck, Users, X } from 'lucide-react';
+import { Bell, Boxes, ChartColumn, ClipboardList, ExternalLink, Flame, History, KeyRound, LayoutDashboard, LogOut, Mail, MapPin, Menu, Settings, Store, Tags, UserCheck, Users, UsersRound, X } from 'lucide-react';
 import { AnimatePresence, motion, useAnimationControls } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -102,14 +102,19 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
       {can('orders.view') && <NavLink to="/admin/orders" className={item}><ClipboardList className="size-4" /> {t('admin.nav.orders')} {badge(newOrders)}</NavLink>}
       {can('resellers.approve') && <NavLink to="/admin/approvals" className={item}><UserCheck className="size-4" /> {t('admin.nav.approvals')} {badge(apps.data?.length ?? 0)}</NavLink>}
       {can('resellers.view') && <NavLink to="/admin/resellers" className={item}><Users className="size-4" /> {t('admin.nav.resellers')}</NavLink>}
+      {group(t('admin.nav.sales'))}
+      {can('pos.use') && <NavLink to="/admin/pos" className={item}><Store className="size-4" /> {t('admin.nav.pos')}</NavLink>}
+      <NavLink to="/admin/team" className={item}><UsersRound className="size-4" /> {can('commissions.manage') || can('reports.view') ? t('admin.nav.team') : t('admin.nav.myPerformance')}</NavLink>
+      {can('reports.view') && <NavLink to="/admin/reports" className={item}><ChartColumn className="size-4" /> {t('admin.nav.reports')}</NavLink>}
       {(can('products.view') || can('deals.edit')) && group(t('admin.nav.catalog'))}
       {can('products.view') && <NavLink to="/admin/products" className={item}><Boxes className="size-4" /> {t('admin.nav.products')}</NavLink>}
       {can('products.view') && <NavLink to="/admin/categories" className={item}><Tags className="size-4" /> {t('admin.nav.categories')}</NavLink>}
       {can('deals.edit') && <NavLink to="/admin/deals" className={item}><Flame className="size-4" /> {t('sale.nav')}</NavLink>}
       {can('rules.edit') && group(t('admin.nav.rules'))}
       {can('rules.edit') && <NavLink to="/admin/rules" className={item}><MapPin className="size-4" /> {t('admin.nav.cities')}</NavLink>}
-      {(can('settings.edit') || can('users.manage') || can('audit.view')) && group(t('admin.nav.system'))}
+      {(can('settings.edit') || can('users.manage') || can('audit.view') || can('email.manage')) && group(t('admin.nav.system'))}
       {can('users.manage') && <NavLink to="/admin/users" className={item}><KeyRound className="size-4" /> {t('admin.nav.users')}</NavLink>}
+      {can('email.manage') && <NavLink to="/admin/emails" className={item}><Mail className="size-4" /> {t('admin.nav.emails')}</NavLink>}
       {can('settings.edit') && <NavLink to="/admin/settings" className={item}><Settings className="size-4" /> {t('admin.nav.settings')}</NavLink>}
       {can('audit.view') && <NavLink to="/admin/audit" className={item}><History className="size-4" /> {t('admin.nav.audit')}</NavLink>}
     </nav>
@@ -167,8 +172,8 @@ export function AdminLayout() {
   const [drawer, setDrawer] = useState(false);
   const aside = 'inv flex h-full flex-col gap-2 p-3 [--inv-bg:#000] [--inv-fg:#fff] dark:[--inv-bg:#161616] dark:[--inv-fg:#ededed]';
   return (
-    <div className="grid min-h-dvh bg-canvas lg:grid-cols-[232px_1fr]">
-      <aside className={clsx(aside, 'sticky top-0 hidden h-dvh lg:flex')}>
+    <div className="grid min-h-dvh bg-canvas lg:grid-cols-[232px_1fr] print:block print:bg-white">
+      <aside className={clsx(aside, 'sticky top-0 hidden h-dvh overflow-y-auto lg:flex print:!hidden')}>
         <div className="px-2 pb-3 pt-1"><Brand sub="Admin" /></div>
         <SideNav />
       </aside>
@@ -197,7 +202,7 @@ export function AdminLayout() {
         <motion.main key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6">
           <Outlet />
         </motion.main>
-        <Footer variant="admin" />
+        <div className="print:hidden"><Footer variant="admin" /></div>
       </div>
     </div>
   );

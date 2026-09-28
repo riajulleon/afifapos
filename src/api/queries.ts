@@ -48,3 +48,15 @@ export const useCategories = () => useQuery({ queryKey: ['categories'], queryFn:
 export const useRoles = () => useQuery({ queryKey: ['admin', 'roles'], queryFn: api.roles });
 export const useStaffUsers = () => useQuery({ queryKey: ['admin', 'staff'], queryFn: api.staffUsers });
 export const useReseller = (id: string) => useQuery({ queryKey: ['admin', 'reseller', id], queryFn: () => api.reseller(id), enabled: !!id });
+
+export const usePosCatalog = () => useQuery({ queryKey: ['admin', 'pos'], queryFn: api.posCatalog });
+export const usePocOptions = () => useQuery({ queryKey: ['admin', 'poc-options'], queryFn: api.pocOptions });
+export const useTeam = (from: string, to: string) => useQuery({ queryKey: ['admin', 'team', from, to], queryFn: () => api.teamPerformance(from, to) });
+export const useCommissions = (staffId?: string) => useQuery({ queryKey: ['admin', 'commissions', staffId ?? 'all'], queryFn: () => api.commissions(staffId) });
+export const usePayouts = (staffId?: string) => useQuery({ queryKey: ['admin', 'payouts', staffId ?? 'all'], queryFn: () => api.payouts(staffId) });
+export const usePayout = (id: string) => useQuery({ queryKey: ['admin', 'payout', id], queryFn: () => api.payout(id) });
+export const useReport = (type: api.ReportTypeArg, from: string, to: string, lang: 'en' | 'it') => useQuery({ queryKey: ['admin', 'report', type, from, to, lang], queryFn: () => api.report(type, from, to, lang) });
+export const useEmailTemplates = () => useQuery({ queryKey: ['admin', 'email-templates'], queryFn: api.emailTemplates });
+export const useEmailLogs = () => useQuery({ queryKey: ['admin', 'email-logs'], queryFn: api.emailLogs });
+export const useCampaigns = () => useQuery({ queryKey: ['admin', 'campaigns'], queryFn: api.campaigns });
+export const useEmailPreviewOrder = () => useQuery({ queryKey: ['admin', 'email-preview-order'], queryFn: api.emailPreviewOrder });

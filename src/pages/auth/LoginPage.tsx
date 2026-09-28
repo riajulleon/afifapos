@@ -73,6 +73,8 @@ export function LoginPage() {
             <li>Admin · admin@afifa.it · admin12345</li>
             <li>Warehouse staff · magazzino@afifa.it · warehouse1</li>
             <li>Accountant · contabilita@afifa.it · accounts01</li>
+            <li>Sales rep (POS) · davide@afifa.it · salesrep01</li>
+            <li>Sales rep · nusrat@afifa.it · salesrep02</li>
             <li>Pending · minimarket.pigneto@gmail.com · wholesale1</li>
           </ul>
         </details>

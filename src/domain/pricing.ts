@@ -123,12 +123,17 @@ export function allocate(amount: number, weights: number[]): number[] {
   return floors;
 }
 
-export function vatSummary(lines: VatLine[], shippingCents: number): VatSummaryRow[] {
+/** `shipWeights` (per line) decides how shipping is split when it shouldn't follow the net values, e.g. after a 100% discount. */
+export function vatSummary(lines: VatLine[], shippingCents: number, shipWeights?: number[]): VatSummaryRow[] {
   const byRate = new Map<number, number>();
-  for (const l of lines) byRate.set(l.vatPercent, (byRate.get(l.vatPercent) ?? 0) + l.netCents);
+  const weightByRate = new Map<number, number>();
+  lines.forEach((l, i) => {
+    byRate.set(l.vatPercent, (byRate.get(l.vatPercent) ?? 0) + l.netCents);
+    weightByRate.set(l.vatPercent, (weightByRate.get(l.vatPercent) ?? 0) + (shipWeights?.[i] ?? l.netCents));
+  });
   const rates = [...byRate.keys()].sort((a, b) => a - b);
   const bases = rates.map((r) => byRate.get(r)!);
-  const shipParts = allocate(shippingCents, bases);
+  const shipParts = allocate(shippingCents, rates.map((r) => weightByRate.get(r)!));
   return rates.map((percent, i) => {
     const baseCents = bases[i] + shipParts[i];
     return { percent, baseCents, vatCents: roundHalfUp((baseCents * percent) / 100) };
@@ -143,10 +148,28 @@ export interface Totals {
   totalCents: number;
 }
 
-export function orderTotals(lines: VatLine[], shippingCents: number): Totals {
-  const subtotalCents = lines.reduce((a, l) => a + l.netCents, 0);
+/**
+ * Totals for an order. A whole-order discount (POS-03) is split across the lines by value, so each VAT rate
+ * is charged on the discounted base; `subtotalCents` is the goods after the discount.
+ */
+export function orderTotals(lines: VatLine[], shippingCents: number, discountCents = 0): Totals {
+  const goods = lines.reduce((a, l) => a + l.netCents, 0);
+  const off = Math.min(Math.max(0, discountCents), goods);
+  const shares = allocate(off, lines.map((l) => l.netCents));
+  const net = lines.map((l, i) => ({ ...l, netCents: l.netCents - shares[i] }));
+  const subtotalCents = goods - off;
   const ship = lines.length ? shippingCents : 0;
-  const vat = vatSummary(lines, ship);
+  // Shipping follows the discounted values, or the list values if nothing is left to weigh by.
+  const vat = vatSummary(net, ship, subtotalCents > 0 ? undefined : lines.map((l) => l.netCents));
   const vatCents = vat.reduce((a, r) => a + r.vatCents, 0);
   return { subtotalCents, shippingCents: ship, vat, vatCents, totalCents: subtotalCents + ship + vatCents };
+}
+
+/* ---------- POS discount (POS-03) ---------- */
+
+/** What a discount comes to on `goodsCents`: percent rounds half up; fixed is capped at the goods value. */
+export function discountAmount(kind: 'percent' | 'fixed', value: number, goodsCents: number): number {
+  if (!(value > 0) || goodsCents <= 0) return 0;
+  if (kind === 'percent') return Math.min(goodsCents, roundHalfUp((goodsCents * Math.min(value, 100)) / 100));
+  return Math.min(goodsCents, Math.round(value));
 }

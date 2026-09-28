@@ -1,13 +1,19 @@
 // In-browser stand-in for the Phase 3 API. Same function signatures the real HTTP client will expose;
 // state persists in localStorage and changes are broadcast to other tabs (admin alerts, live prices).
+import { syncOrderCommission } from '../domain/commission';
+import { unknownVariables } from '../domain/email';
 import { eur } from '../domain/money';
-import { DEFAULT_BANDS, dealAllowance, fitTiers, isDealLive, liveDealFor, minQty, orderTotals, resolveMinimum, resolveShipping, unitPrice, validateBands } from '../domain/pricing';
+import { DEFAULT_BANDS, dealAllowance, discountAmount, fitTiers, isDealLive, liveDealFor, minQty, orderTotals, resolveMinimum, resolveShipping, unitPrice, validateBands } from '../domain/pricing';
+import { buildReport, REPORT_TYPES, type Report, type ReportType } from '../domain/reports';
 import { addDays, romeDateKey } from '../domain/romeTime';
 import type {
-  AccountState, Category, City, Deal, Permission, StaffRole, Lang, Order, OrderLine, OrderStatus, PaymentInput, PaymentRecord, PaymentStatus, Product, Settings, UploadedDoc, User, Zone,
+  AccountState, Audience, Campaign, Category, City, CommissionEntry, Deal, EmailContent, EmailLog, EmailTemplate, EmailTrigger, Permission, StaffRole, Lang, Order, OrderDiscount, OrderLine, OrderStatus,
+  PaymentInput, PaymentKind, PaymentRecord, PaymentStatus, Payout, Product, Settings, SmtpSettings, UploadedDoc, User, Zone,
 } from '../domain/types';
+import { sanitizeHtml } from '../lib/sanitize';
 import { normalizeMobile, rules } from '../lib/validate';
-import { createSeed, DB_VERSION, seedSettings, type Db } from '../mock/seed';
+import { baseVars, compose, makeLog, orderVars, simulateDelivery, templateFor } from '../mock/mailer';
+import { createSeed, DB_VERSION, seedSettings, WALK_IN, type Db } from '../mock/seed';
 
 const DB_KEY = 'afifa-mockdb';
 const SESSION_KEY = 'afifa-session';
@@ -83,6 +89,39 @@ const uid = (p: string) => `${p}${Date.now().toString(36)}${Math.random().toStri
 
 function audit(actor: User | null, action: string) {
   db.audit.unshift({ id: uid('a'), at: new Date().toISOString(), actor: actor?.fullName ?? 'System', action });
+}
+
+/* ---------- commission + email side effects ---------- */
+
+/** Keeps the order's commission lines in step after any change to the order (COM-03). */
+function syncCommission(o: Order) {
+  const pct = db.users.find((u) => u.id === o.pocId)?.commissionPct ?? db.settings.commission.defaultPct;
+  const { update, add } = syncOrderCommission(o, db.commissions, pct, db.settings.commission, () => uid('c'));
+  for (const e of update) {
+    const i = db.commissions.findIndex((x) => x.id === e.id);
+    if (i >= 0) db.commissions[i] = e;
+  }
+  db.commissions.push(...add);
+}
+
+const EMAIL_LOG_CAP = 5000;
+
+function logEmail(log: EmailLog) {
+  db.emails.unshift(log);
+  if (db.emails.length > EMAIL_LOG_CAP) db.emails.length = EMAIL_LOG_CAP;
+}
+
+/** Sends a triggered email if its template is switched on (MAIL-02). Walk-in POS customers have no address and get none. */
+function notify(trigger: EmailTrigger, to: Pick<User, 'email' | 'fullName' | 'businessName' | 'lang'>, extra: Record<string, string> = {}, order?: Order) {
+  const tpl = templateFor(db, trigger);
+  if (!tpl?.enabled || !to.email) return;
+  const vars = { ...(order ? orderVars(db, order, to, to.lang) : baseVars(db, to, to.lang)), ...extra };
+  const rendered = compose(db, tpl.content[to.lang], to.lang, vars, trigger === 'payment_received' || trigger === 'application_received' || trigger === 'application_rejected' ? undefined : order);
+  logEmail(makeLog(db, uid('e'), trigger, to.email, to.fullName, rendered, new Date(), { orderId: order?.id }));
+}
+
+function buyerOf(o: Order) {
+  return db.users.find((u) => u.id === o.userId);
 }
 
 /* ---------- session ---------- */
@@ -184,9 +223,10 @@ export async function apply(input: ApplicationInput): Promise<User> {
   const email = input.email.trim().toLowerCase();
   if (db.users.some((u) => u.email.toLowerCase() === email)) throw new ApiError('email_taken');
   if (db.users.some((u) => u.mobile === input.mobile)) throw new ApiError('mobile_taken');
-  const user: User = { ...input, email, id: uid('u'), role: 'reseller', state: 'pending', createdAt: new Date().toISOString() };
+  const user: User = { ...input, email, id: uid('u'), role: 'reseller', state: 'pending', createdAt: new Date().toISOString(), pocId: null };
   db.users.push(user);
   localStorage.setItem(SESSION_KEY, user.id);
+  notify('application_received', user);
   commit();
   return clone(user);
 }
@@ -327,6 +367,8 @@ export async function placeOrder(input: { items: { productId: string; qty: numbe
     id: uid('o'),
     number: `AF-${year}-${String(db.orderSeq).padStart(5, '0')}`,
     invoiceNumber: `${db.settings.business.invoicePrefix}${year}/${String(db.invoiceSeq[year]).padStart(6, '0')}`,
+    channel: 'online',
+    pocId: u.pocId ?? null,
     userId: u.id,
     businessName: u.businessName,
     cityId: city.id,
@@ -351,6 +393,8 @@ export async function placeOrder(input: { items: { productId: string; qty: numbe
     emailSentAt: now.toISOString(), // INV-07: the real API queues the invoice email here
   };
   db.orders.unshift(order);
+  syncCommission(order);
+  notify('order_placed', u, {}, order);
   persist();
   emit({ type: 'order-placed', orderId: order.id, number: order.number, business: u.businessName, city: city.name, totalCents: order.totalCents });
   emit({ type: 'changed' });
@@ -386,17 +430,34 @@ export async function adminOrders(): Promise<Order[]> {
 
 const FLOW: OrderStatus[] = ['received', 'confirmed', 'shipped', 'delivered'];
 
-export async function setOrderStatus(id: string, status: OrderStatus) {
+export async function setOrderStatus(id: string, status: OrderStatus, reason = '') {
   await latency();
   const admin = requirePerm(status === 'cancelled' ? 'orders.cancel' : 'orders.status');
   const o = db.orders.find((x) => x.id === id);
   if (!o) throw new ApiError('not_found');
+  if (o.status === 'cancelled') throw new ApiError('bad_transition');
+  const inWarehouse = o.status === 'received' || o.status === 'confirmed';
   const pm = db.settings.paymentMethods.find((m) => m.id === o.paymentMethodId);
   if (status === 'shipped' && pm?.shipOnlyAfterPayment && o.paymentStatus !== 'paid') throw new ApiError('pay_before_ship'); // PAY-05
   if (status !== 'cancelled' && FLOW.indexOf(status) <= FLOW.indexOf(o.status)) throw new ApiError('bad_transition');
   o.status = status;
   o.history.push({ status, at: new Date().toISOString() });
-  audit(admin, `Order ${o.number} → ${status}`);
+  if (status === 'cancelled' && inWarehouse) {
+    // Goods that never left go back on the shelf, and sale counts are released.
+    for (const l of o.lines) {
+      const p = db.products.find((x) => x.id === l.productId);
+      if (p) p.stock += l.qty;
+      const d = l.source.startsWith('deal:') ? db.deals.find((x) => `deal:${x.id}` === l.source) : undefined;
+      if (d) d.sold = Math.max(0, d.sold - l.qty);
+    }
+  }
+  syncCommission(o);
+  const buyer = buyerOf(o);
+  if (buyer) {
+    const trigger = ({ cancelled: 'order_cancelled', shipped: 'order_shipped', delivered: 'order_completed' } as Partial<Record<OrderStatus, EmailTrigger>>)[status];
+    if (trigger) notify(trigger, buyer, { reason: reason.trim() || (buyer.lang === 'it' ? 'nessun motivo indicato' : 'no reason given') }, o);
+  }
+  audit(admin, `Order ${o.number} → ${status}${reason.trim() ? `: “${reason.trim()}”` : ''}`);
   commit();
 }
 
@@ -418,6 +479,15 @@ export async function markPaid(id: string, p: PaymentInput): Promise<PaymentReco
   o.payments.push(record);
   const status = statusFor(o);
   o.paymentStatus = status;
+  syncCommission(o);
+  const buyer = buyerOf(o);
+  if (buyer) {
+    notify('payment_received', buyer, {
+      amount: eur(p.amountCents, buyer.lang), receipt_number: record.receiptNumber,
+      receipt_link: `${orderVars(db, o, buyer, buyer.lang).order_link.replace('/orders/', '/receipt/')}/${record.id}`,
+      balance: eur(Math.max(0, o.totalCents - paidSoFar(o)), buyer.lang),
+    }, o);
+  }
   audit(admin, `Order ${o.number} payment ${status}: ${eur(p.amountCents)} via ${p.kind}, ref ${p.reference}, receipt ${record.receiptNumber}`);
   commit();
   return clone(record);
@@ -482,13 +552,18 @@ export async function editOrder(id: string, edit: OrderEdit): Promise<Order> {
   if (edit.shippingCents !== o.shippingCents) changes.push(`shipping ${eur(o.shippingCents)} → ${eur(edit.shippingCents)}`);
   if (pm.id !== o.paymentMethodId) changes.push(`payment method → ${pm.name.en}`);
 
-  const t = orderTotals(lines.map((l) => ({ netCents: l.lineCents, vatPercent: l.vatPercent })), edit.shippingCents);
+  // A POS discount stays as entered: a percentage re-applies to the new goods value, a fixed amount is capped by it.
+  const goods = lines.reduce((a, l) => a + l.lineCents, 0);
+  const discount: OrderDiscount | undefined = o.discount ? { ...o.discount, cents: discountAmount(o.discount.kind, o.discount.value, goods) } : undefined;
+  const t = orderTotals(lines.map((l) => ({ netCents: l.lineCents, vatPercent: l.vatPercent })), edit.shippingCents, discount?.cents ?? 0);
   Object.assign(o, {
     lines, subtotalCents: t.subtotalCents, shippingCents: t.shippingCents, vat: t.vat, totalCents: t.totalCents,
     paymentMethodId: pm.id, paymentMethodName: pm.name, paymentInstructions: pm.instructions,
     editedAt: new Date().toISOString(), emailSentAt: new Date().toISOString(),
   });
+  if (discount) o.discount = discount;
   o.paymentStatus = statusFor(o);
+  syncCommission(o);
   audit(admin, `Edited order ${o.number}: ${changes.join('; ') || 'no changes'} · new total ${eur(o.totalCents)}`);
   commit();
   return clone(o);
@@ -523,18 +598,35 @@ export async function review(userId: string, decision: 'approve' | 'reject' | 'i
   if (!u) throw new ApiError('not_found');
   u.state = decision === 'approve' ? 'approved' : decision === 'reject' ? 'rejected' : 'info_requested';
   u.reviewNote = note || undefined;
+  if (decision === 'reject') notify('application_rejected', u, { reason: note.trim() || (u.lang === 'it' ? 'documenti non validi' : 'documents could not be verified') });
   audit(admin, `${decision === 'approve' ? 'Approved' : decision === 'reject' ? 'Rejected' : 'Requested info from'} ${u.businessName}${note ? `: “${note}”` : ''}`);
   commit();
 }
 
 export async function adminSettings(): Promise<Settings> {
   requireStaff();
-  return clone(db.settings);
+  const s = clone(db.settings);
+  delete s.smtp.password; // write-only (MAIL-01)
+  return s;
 }
+
+/** Each settings area has its own permission; a patch needs all of the ones it touches. */
+const SETTING_PERM: Partial<Record<keyof Settings, Permission>> = {
+  globalMinOrderCents: 'rules.edit', saleBanner: 'deals.edit', commission: 'commissions.manage', emailTheme: 'email.manage', smtp: 'email.manage',
+};
 
 export async function updateSettings(patch: Partial<Settings>, what: string) {
   await latency();
-  const admin = requirePerm(patch.globalMinOrderCents !== undefined ? 'rules.edit' : patch.saleBanner ? 'deals.edit' : 'settings.edit');
+  const perms = [...new Set((Object.keys(patch) as (keyof Settings)[]).map((k) => SETTING_PERM[k] ?? 'settings.edit'))];
+  if (patch.smtp) throw new ApiError('forbidden'); // SMTP goes through saveSmtp, which keeps the password write-only
+  const admin = requireStaff();
+  for (const p of perms) requirePerm(p);
+  if (patch.pos) {
+    const pos = patch.pos;
+    if (!(pos.maxDiscountPct >= 0 && pos.maxDiscountPct <= 100) || !db.cities.some((c) => c.id === pos.storeCityId)) throw new ApiError('generic');
+  }
+  if (patch.commission && !(patch.commission.defaultPct >= 0 && patch.commission.defaultPct <= 50)) throw new ApiError('rate_invalid');
+  if (patch.emailTheme && ![patch.emailTheme.accent, patch.emailTheme.background].every((c) => /^#[0-9a-f]{6}$/i.test(c))) throw new ApiError('generic');
   if (patch.pricing) {
     const bad = validateBands(patch.pricing);
     if (bad) throw new ApiError(bad);
@@ -703,7 +795,7 @@ export async function staffUsers(): Promise<User[]> {
   return db.users.filter((u) => u.role === 'staff').map(withPerms);
 }
 
-export interface StaffInput { id?: string; fullName: string; email: string; mobile: string; roleId: string; lang: Lang; password?: string }
+export interface StaffInput { id?: string; fullName: string; email: string; mobile: string; roleId: string; lang: Lang; password?: string; commissionPct?: number | null }
 
 const activeOwners = () => db.users.filter((u) => u.role === 'staff' && u.roleId === 'owner' && u.state === 'approved');
 
@@ -715,17 +807,20 @@ export async function saveStaffUser(input: StaffInput) {
   if (db.users.some((u) => u.id !== input.id && u.email.toLowerCase() === email)) throw new ApiError('email_taken');
   const mobile = normalizeMobile(input.mobile);
   if (mobile && db.users.some((u) => u.id !== input.id && u.mobile === mobile)) throw new ApiError('mobile_taken');
+  const pct = input.commissionPct ?? undefined;
+  if (pct !== undefined && !(pct >= 0 && pct <= 50)) throw new ApiError('rate_invalid');
   const existing = db.users.find((u) => u.id === input.id && u.role === 'staff');
   if (existing) {
     if (existing.roleId === 'owner' && input.roleId !== 'owner' && activeOwners().length <= 1) throw new ApiError('last_owner');
     const from = db.roles.find((r) => r.id === existing.roleId)?.name;
-    Object.assign(existing, { fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang });
+    if (existing.commissionPct !== pct) audit(admin, `Commission rate of ${existing.fullName}: ${existing.commissionPct ?? 'default'}% → ${pct ?? 'default'}% (new orders only)`);
+    Object.assign(existing, { fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang, commissionPct: pct });
     if (input.password) existing.password = input.password;
     audit(admin, `Edited staff user ${existing.fullName}${from !== db.roles.find((r) => r.id === input.roleId)?.name ? ` (role ${from} → ${db.roles.find((r) => r.id === input.roleId)?.name})` : ''}`);
   } else {
     if (!input.password || rules.password(input.password)) throw new ApiError('user_invalid');
     const base = db.users.find((u) => u.id === admin.id)!;
-    db.users.push({ ...clone(base), id: uid('u'), role: 'staff', state: 'approved', fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang, password: input.password, createdAt: new Date().toISOString(), licenceDoc: undefined, vatDoc: undefined, extraDocs: undefined, reviewNote: undefined });
+    db.users.push({ ...clone(base), id: uid('u'), role: 'staff', state: 'approved', fullName: input.fullName.trim(), email, mobile, roleId: input.roleId, lang: input.lang, password: input.password, commissionPct: pct, createdAt: new Date().toISOString(), licenceDoc: undefined, vatDoc: undefined, extraDocs: undefined, reviewNote: undefined });
     audit(admin, `Created staff user ${input.fullName.trim()} (${db.roles.find((r) => r.id === input.roleId)?.name})`);
   }
   commit();
@@ -750,7 +845,8 @@ export async function deleteStaffUser(id: string) {
   const u = db.users.find((x) => x.id === id && x.role === 'staff');
   if (!u) throw new ApiError('not_found');
   if (u.id === admin.id) throw new ApiError('not_yourself');
-  if (db.audit.some((a) => a.actor === u.fullName)) throw new ApiError('user_has_history');
+  if (db.audit.some((a) => a.actor === u.fullName) || db.commissions.some((c) => c.staffId === id)) throw new ApiError('user_has_history');
+  db.users.forEach((r) => { if (r.pocId === id) r.pocId = null; });
   db.users = db.users.filter((x) => x.id !== id);
   audit(admin, `Deleted staff user ${u.fullName}`);
   commit();
@@ -900,6 +996,517 @@ export async function importResellers(rows: ResellerInput[], opts: { commit: boo
     commit();
   }
   return results;
+}
+
+/* ---------- POS (POS) ---------- */
+
+export interface PosCustomer { id: string; businessName: string; fullName: string; cityName: string; email: string; pocId: string | null; deliveryCents: number }
+
+/** Everything the till needs in one call: sellable products and approved resellers (POS-01). */
+export async function posCatalog(): Promise<{ products: Product[]; customers: PosCustomer[]; maxDiscountPct: number; canOverride: boolean; receiptFooter: Settings['pos']['receiptFooter'] }> {
+  await latency();
+  const u = requirePerm('pos.use');
+  return clone({
+    maxDiscountPct: db.settings.pos.maxDiscountPct,
+    canOverride: permissionsOf(u).includes('pos.discount'),
+    receiptFooter: db.settings.pos.receiptFooter,
+    products: db.products.filter((p) => p.active),
+    customers: db.users.filter((u) => u.role === 'reseller' && u.state === 'approved').map((u) => ({
+      id: u.id, businessName: u.businessName, fullName: u.fullName, cityName: db.cities.find((c) => c.id === u.cityId)?.name ?? '', email: u.email, pocId: u.pocId ?? null,
+      deliveryCents: (() => { const c = db.cities.find((x) => x.id === u.cityId); return c ? resolveShipping(c, u.zoneId).cents : 0; })(),
+    })),
+  });
+}
+
+export interface PosSaleInput {
+  customer: { kind: 'walkin'; name: string } | { kind: 'reseller'; userId: string };
+  items: { productId: string; qty: number }[];
+  discount: { kind: 'percent' | 'fixed'; value: number; reason: string } | null;
+  /** 'later' puts the sale on the reseller's account (awaiting payment); walk-ins always pay now. */
+  payment: { kind: PaymentKind | 'later'; tenderedCents?: number; reference: string };
+  /** true = goods leave with the customer now (Completed); false = we deliver (Confirmed, delivery fee applies). */
+  handedOver: boolean;
+}
+
+/**
+ * Rings up a counter sale (POS-02…05). The server prices everything again, checks stock, the discount limit
+ * and the payment, then takes the order, invoice and receipt numbers in one step.
+ */
+export async function posCheckout(input: PosSaleInput): Promise<Order> {
+  await latency();
+  const cashier = requirePerm('pos.use');
+  const now = new Date();
+  const store = db.cities.find((c) => c.id === db.settings.pos.storeCityId) ?? db.cities[0];
+  const buyer = input.customer.kind === 'reseller' ? db.users.find((u) => u.id === (input.customer as { userId: string }).userId && u.role === 'reseller' && u.state === 'approved') : undefined;
+  if (input.customer.kind === 'reseller' && !buyer) throw new ApiError('pos_customer');
+  const who: User = buyer ?? WALK_IN(input.customer.kind === 'walkin' && input.customer.name.trim() ? input.customer.name.trim().slice(0, 80) : 'Walk-in customer', { cityId: store.id, zoneId: store.zones[0]?.id ?? '', address: db.settings.business.address });
+  if (!buyer && !input.handedOver) throw new ApiError('pos_walkin_delivery');
+  if (!buyer && input.payment.kind === 'later') throw new ApiError('pos_walkin_later');
+
+  const merged = new Map<string, number>();
+  for (const i of input.items) {
+    if (!Number.isInteger(i.qty) || i.qty < 1 || i.qty > 9999) throw new ApiError('generic');
+    merged.set(i.productId, (merged.get(i.productId) ?? 0) + i.qty);
+  }
+  if (!merged.size) throw new ApiError('empty');
+  const bought = buyer ? countBoughtToday(buyer.id) : {};
+  const lines = [...merged].map(([productId, qty]) => {
+    const p = db.products.find((x) => x.id === productId && x.active);
+    if (!p) throw new ApiError('product_gone');
+    if (qty > p.stock) throw new ApiError('stock', { name: p.name.en, left: p.stock });
+    // A live deal applies at the counter too, within its limits; above the allowance the band price applies.
+    const live = liveDealFor(p.id, db.deals, now);
+    const deal = live && qty <= dealAllowance(live, bought[p.id] ?? 0) ? live : undefined;
+    const price = unitPrice(p, qty, deal, db.settings.pricing);
+    const vatPercent = db.settings.vatRates.find((v) => v.id === p.vatRateId)?.percent ?? 22;
+    return { productId: p.id, sku: p.sku, name: p.name, pack: p.pack, qty, unitCents: price.unitCents, source: price.source, vatPercent, lineCents: price.unitCents * qty, deal };
+  });
+
+  const goods = lines.reduce((a, l) => a + l.lineCents, 0);
+  let discount: OrderDiscount | undefined;
+  if (input.discount && input.discount.value > 0) {
+    const d = input.discount;
+    if (d.kind === 'percent' && !(d.value > 0 && d.value <= 100)) throw new ApiError('discount_invalid');
+    if (d.kind === 'fixed' && !(Number.isInteger(d.value) && d.value > 0)) throw new ApiError('discount_invalid');
+    if (!d.reason.trim()) throw new ApiError('discount_reason');
+    const cents = discountAmount(d.kind, d.value, goods);
+    const max = db.settings.pos.maxDiscountPct;
+    if (cents > Math.round((goods * max) / 100) && !permissionsOf(cashier).includes('pos.discount')) throw new ApiError('discount_limit', { max });
+    discount = { kind: d.kind, value: d.value, cents, reason: d.reason.trim().slice(0, 120) };
+  }
+  const zone = buyer ? db.cities.find((c) => c.id === buyer.cityId) : undefined;
+  const ship = input.handedOver || !zone ? 0 : resolveShipping(zone, buyer!.zoneId).cents;
+  const t = orderTotals(lines.map((l) => ({ netCents: l.lineCents, vatPercent: l.vatPercent })), ship, discount?.cents ?? 0);
+
+  const pay = input.payment;
+  const later = pay.kind === 'later';
+  if (!later) {
+    if (pay.kind === 'cash') {
+      if (!(Number.isInteger(pay.tenderedCents) && pay.tenderedCents! >= t.totalCents)) throw new ApiError('pos_tendered', { total: eur(t.totalCents) });
+    } else if (!pay.reference.trim()) throw new ApiError('reference_required');
+  }
+
+  const romeDate = romeDateKey(now);
+  const year = romeDate.slice(0, 4);
+  db.orderSeq += 1;
+  db.invoiceSeq[year] = (db.invoiceSeq[year] ?? 0) + 1;
+  for (const l of lines) {
+    db.products.find((x) => x.id === l.productId)!.stock -= l.qty;
+    if (l.deal) l.deal.sold += l.qty;
+  }
+  const at = now.toISOString();
+  const status: OrderStatus = input.handedOver ? 'delivered' : 'confirmed';
+  const kindName: Record<string, [string, string]> = { cash: ['Cash', 'Contanti'], card: ['Card', 'Carta'], later: ['On account', 'A credito'] };
+  const pm = !later && !kindName[pay.kind] ? db.settings.paymentMethods.find((m) => m.kind === pay.kind) : undefined;
+  const methodName = pm?.name ?? { en: (kindName[pay.kind] ?? [pay.kind, pay.kind])[0], it: (kindName[pay.kind] ?? [pay.kind, pay.kind])[1] };
+  const order: Order = {
+    id: uid('o'),
+    number: `AF-${year}-${String(db.orderSeq).padStart(5, '0')}`,
+    invoiceNumber: `${db.settings.business.invoicePrefix}${year}/${String(db.invoiceSeq[year]).padStart(6, '0')}`,
+    channel: 'pos',
+    cashier: cashier.fullName,
+    tenderedCents: pay.kind === 'cash' ? pay.tenderedCents : undefined,
+    ...(discount ? { discount } : {}),
+    pocId: buyer?.pocId ?? null,
+    userId: buyer?.id ?? '',
+    businessName: who.businessName,
+    cityId: buyer?.cityId ?? store.id,
+    cityName: db.cities.find((c) => c.id === (buyer?.cityId ?? store.id))?.name ?? store.name,
+    zoneName: buyer ? db.cities.find((c) => c.id === buyer.cityId)?.zones.find((z) => z.id === buyer.zoneId)?.name ?? '' : '',
+    address: who.address,
+    lines: lines.map(({ deal: _deal, ...l }) => l),
+    subtotalCents: t.subtotalCents,
+    shippingCents: t.shippingCents,
+    vat: t.vat,
+    totalCents: t.totalCents,
+    paymentMethodId: pm?.id ?? `pos-${pay.kind}`,
+    paymentMethodName: methodName,
+    paymentInstructions: later ? (db.settings.paymentMethods.find((m) => m.id === 'bank')?.instructions ?? { en: '', it: '' }) : { en: 'Paid at the counter.', it: 'Pagato al banco.' },
+    paymentStatus: 'awaiting',
+    payments: [],
+    status,
+    history: (input.handedOver ? FLOW : FLOW.slice(0, 2)).map((s) => ({ status: s, at })),
+    placedAt: at,
+    romeDate,
+    lang: buyer?.lang ?? cashier.lang,
+    emailSentAt: buyer ? at : null,
+  };
+  if (!later) {
+    db.receiptSeq[year] = (db.receiptSeq[year] ?? 0) + 1;
+    order.payments.push({
+      id: uid('pay'), receiptNumber: `RC-${year}-${String(db.receiptSeq[year]).padStart(6, '0')}`, kind: pay.kind as PaymentKind, receivedOn: romeDate, amountCents: t.totalCents,
+      reference: pay.kind === 'cash' ? 'Cash' : pay.reference.trim().slice(0, 60), note: pay.kind === 'cash' ? `Tendered ${eur(pay.tenderedCents!)}, change ${eur(pay.tenderedCents! - t.totalCents)}` : '',
+      recordedAt: at, recordedBy: cashier.fullName, emailedAt: buyer ? at : null,
+    });
+    order.paymentStatus = 'paid';
+  }
+  db.orders.unshift(order);
+  syncCommission(order);
+  if (buyer) {
+    notify('order_placed', buyer, {}, order);
+    const p = order.payments[0];
+    if (p) notify('payment_received', buyer, { amount: eur(p.amountCents, buyer.lang), receipt_number: p.receiptNumber, receipt_link: `${orderVars(db, order, buyer, buyer.lang).order_link.replace('/orders/', '/receipt/')}/${p.id}`, balance: eur(0, buyer.lang) }, order);
+  }
+  audit(cashier, `POS sale ${order.number} to ${order.businessName}: ${eur(order.totalCents)}${discount ? `, discount ${eur(discount.cents)} (${discount.reason})` : ''}, ${later ? 'on account' : `paid by ${pay.kind}`}`);
+  commit();
+  return clone(order);
+}
+
+/* ---------- points of contact and commission (TEAM, COM) ---------- */
+
+export interface StaffOption { id: string; fullName: string; roleName: string; commissionPct: number; active: boolean }
+
+/** Staff who can be a reseller's point of contact. */
+export async function pocOptions(): Promise<StaffOption[]> {
+  requireStaff();
+  return db.users.filter((u) => u.role === 'staff').map((u) => ({
+    id: u.id, fullName: u.fullName, roleName: db.roles.find((r) => r.id === u.roleId)?.name ?? '', commissionPct: u.commissionPct ?? db.settings.commission.defaultPct, active: u.state === 'approved',
+  }));
+}
+
+/** TEAM-02: new orders earn commission for the new contact; existing orders keep theirs. */
+export async function assignPoc(resellerIds: string[], staffId: string | null) {
+  await latency();
+  const admin = requirePerm('resellers.edit');
+  const staff = staffId ? db.users.find((u) => u.id === staffId && u.role === 'staff' && u.state === 'approved') : null;
+  if (staffId && !staff) throw new ApiError('not_found');
+  const changed: string[] = [];
+  for (const id of resellerIds) {
+    const r = db.users.find((u) => u.id === id && u.role === 'reseller');
+    if (!r) throw new ApiError('not_found');
+    if ((r.pocId ?? null) === staffId) continue;
+    const before = db.users.find((u) => u.id === r.pocId)?.fullName ?? 'nobody';
+    r.pocId = staffId;
+    changed.push(`${r.businessName} (${before} → ${staff?.fullName ?? 'nobody'})`);
+  }
+  if (changed.length) audit(admin, `Point of contact changed: ${changed.join('; ')}`);
+  commit();
+}
+
+const canSeeTeam = (u: User) => permissionsOf(u).some((p) => p === 'commissions.manage' || p === 'reports.view');
+
+export interface MemberStats {
+  id: string; fullName: string; email: string; roleName: string; active: boolean; commissionPct: number;
+  resellers: { id: string; businessName: string; cityName: string }[];
+  orders: number; salesCents: number;
+  pendingCents: number; payableCents: number; paidCents: number; earnedCents: number;
+  lastPayout: Payout | null;
+}
+
+/**
+ * Team performance for a date range (TEAM-04). Managers see everyone with resellers or commission;
+ * everyone else sees only their own figures.
+ */
+export async function teamPerformance(from: string, to: string): Promise<MemberStats[]> {
+  await latency();
+  const me = requireStaff();
+  const everyone = canSeeTeam(me);
+  const members = db.users.filter((u) => u.role === 'staff' && (everyone ? u.roleId === 'sales' || db.users.some((r) => r.pocId === u.id) || db.commissions.some((c) => c.staffId === u.id) : u.id === me.id));
+  return members.map((m) => {
+    const orders = db.orders.filter((o) => o.pocId === m.id && o.status !== 'cancelled' && o.romeDate >= from && o.romeDate <= to);
+    const entries = db.commissions.filter((c) => c.staffId === m.id && c.status !== 'void' && c.romeDate >= from && c.romeDate <= to);
+    const sum = (st: CommissionEntry['status']) => entries.filter((c) => c.status === st).reduce((a, c) => a + c.amountCents, 0);
+    const payouts = db.payouts.filter((p) => p.staffId === m.id).sort((a, b) => b.paidOn.localeCompare(a.paidOn));
+    return {
+      id: m.id, fullName: m.fullName, email: m.email, roleName: db.roles.find((r) => r.id === m.roleId)?.name ?? '', active: m.state === 'approved',
+      commissionPct: m.commissionPct ?? db.settings.commission.defaultPct,
+      resellers: db.users.filter((r) => r.pocId === m.id).map((r) => ({ id: r.id, businessName: r.businessName, cityName: db.cities.find((c) => c.id === r.cityId)?.name ?? '' })),
+      orders: orders.length, salesCents: orders.reduce((a, o) => a + o.subtotalCents, 0),
+      pendingCents: sum('pending'), payableCents: sum('payable'), paidCents: sum('paid'), earnedCents: entries.reduce((a, c) => a + c.amountCents, 0),
+      lastPayout: payouts[0] ?? null,
+    };
+  }).sort((a, b) => b.salesCents - a.salesCents);
+}
+
+/** Commission lines. Without commissions.manage you only get your own (COM-05). */
+export async function commissions(staffId?: string): Promise<CommissionEntry[]> {
+  await latency();
+  const me = requireStaff();
+  const all = permissionsOf(me).includes('commissions.manage');
+  const who = all ? staffId : me.id;
+  return clone(db.commissions.filter((c) => !who || c.staffId === who).sort((a, b) => b.romeDate.localeCompare(a.romeDate) || b.createdAt.localeCompare(a.createdAt)));
+}
+
+export async function payouts(staffId?: string): Promise<Payout[]> {
+  await latency();
+  const me = requireStaff();
+  const all = permissionsOf(me).includes('commissions.manage');
+  const who = all ? staffId : me.id;
+  return clone(db.payouts.filter((p) => !who || p.staffId === who).sort((a, b) => b.paidOn.localeCompare(a.paidOn) || b.number.localeCompare(a.number)));
+}
+
+export async function payout(id: string): Promise<{ payout: Payout; entries: CommissionEntry[] }> {
+  await latency();
+  const me = requireStaff();
+  const p = db.payouts.find((x) => x.id === id);
+  if (!p || (!permissionsOf(me).includes('commissions.manage') && p.staffId !== me.id)) throw new ApiError('not_found');
+  return clone({ payout: p, entries: db.commissions.filter((c) => p.entryIds.includes(c.id)) });
+}
+
+export interface PayoutInput { staffId: string; entryIds: string[]; kind: PaymentKind; reference: string; paidOn: string; note: string }
+
+/** COM-06: pays the chosen payable lines (clawbacks included) in one numbered payout; paid lines are then locked. */
+export async function createPayout(input: PayoutInput): Promise<Payout> {
+  await latency();
+  const admin = requirePerm('commissions.manage');
+  const staff = db.users.find((u) => u.id === input.staffId && u.role === 'staff');
+  if (!staff) throw new ApiError('not_found');
+  const ids = new Set(input.entryIds);
+  const entries = db.commissions.filter((c) => ids.has(c.id));
+  if (!entries.length || entries.length !== ids.size) throw new ApiError('payout_nothing');
+  if (entries.some((c) => c.staffId !== staff.id || c.status !== 'payable')) throw new ApiError('payout_stale');
+  const amount = entries.reduce((a, c) => a + c.amountCents, 0);
+  if (amount <= 0) throw new ApiError('payout_nothing');
+  if (!input.reference.trim()) throw new ApiError('reference_required');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(input.paidOn) || input.paidOn > romeDateKey()) throw new ApiError('date_invalid');
+  const y = input.paidOn.slice(0, 4);
+  db.payoutSeq[y] = (db.payoutSeq[y] ?? 0) + 1;
+  const p: Payout = {
+    id: uid('po'), number: `PO-${y}-${String(db.payoutSeq[y]).padStart(4, '0')}`, staffId: staff.id, staffName: staff.fullName, entryIds: entries.map((c) => c.id), amountCents: amount,
+    kind: input.kind, reference: input.reference.trim().slice(0, 80), paidOn: input.paidOn, note: input.note.trim().slice(0, 200), recordedBy: admin.fullName, recordedAt: new Date().toISOString(),
+  };
+  entries.forEach((c) => { c.status = 'paid'; c.payoutId = p.id; });
+  db.payouts.push(p);
+  audit(admin, `Commission payout ${p.number} to ${staff.fullName}: ${eur(amount)} for ${entries.length} lines, ref ${p.reference}`);
+  commit();
+  return clone(p);
+}
+
+/* ---------- reports (REP) ---------- */
+
+export type ReportTypeArg = ReportType;
+
+export async function report(type: ReportType, from: string, to: string, lang: Lang = 'en'): Promise<Report> {
+  await latency();
+  requirePerm('reports.view');
+  if (!REPORT_TYPES.includes(type)) throw new ApiError('not_found');
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from > to) throw new ApiError('date_invalid');
+  if (addDays(from, 800) < to) throw new ApiError('range_too_long');
+  return buildReport(type, {
+    orders: db.orders, users: db.users.map(withPerms), products: db.products, categories: db.categories, commissions: db.commissions, payouts: db.payouts, from, to, lang,
+  });
+}
+
+/* ---------- email (MAIL) ---------- */
+
+export async function emailTemplates(): Promise<EmailTemplate[]> {
+  await latency();
+  requirePerm('email.manage');
+  return clone(db.templates);
+}
+
+const MAX_IMAGE = 1_500_000;
+
+/** Validates and cleans template content (MAIL-03): subject, block limits, safe links and images, known variables. */
+function cleanContent(content: Record<Lang, EmailContent>, kind: EmailTrigger | 'campaign'): Record<Lang, EmailContent> {
+  const out = {} as Record<Lang, EmailContent>;
+  for (const lang of ['en', 'it'] as const) {
+    const c = content[lang];
+    if (!c || !c.subject.trim() || c.subject.length > 200) throw new ApiError('template_subject', { lang: lang.toUpperCase() });
+    if (!c.blocks.length || c.blocks.length > 60) throw new ApiError('template_blocks');
+    const blocks = c.blocks.map((b) => {
+      switch (b.type) {
+        case 'text': return { ...b, html: sanitizeHtml(b.html).slice(0, 20000) };
+        case 'heading': return { ...b, text: b.text.slice(0, 200) };
+        case 'button': {
+          if (!/^(https?:\/\/|mailto:|\{\{\s*[a-z_]+\s*\}\})/i.test(b.url.trim())) throw new ApiError('template_link', { label: b.label });
+          return { ...b, label: b.label.slice(0, 60), url: b.url.trim() };
+        }
+        case 'image': {
+          if (b.src && !(b.src.startsWith('data:image/') || b.src.startsWith('https://'))) throw new ApiError('template_image');
+          if (b.src.length > MAX_IMAGE) throw new ApiError('template_image_size');
+          return { ...b, width: Math.max(40, Math.min(536, Math.round(b.width) || 536)) };
+        }
+        case 'spacer': return { ...b, size: Math.max(4, Math.min(80, Math.round(b.size) || 16)) };
+        default: return b;
+      }
+    });
+    const next = { subject: c.subject.trim(), blocks };
+    const unknown = unknownVariables(next, kind);
+    if (unknown.length) throw new ApiError('template_vars', { vars: unknown.map((v) => `{{${v}}}`).join(', ') });
+    out[lang] = next;
+  }
+  return out;
+}
+
+/** MAIL-05: every save is a new version; the last 30 are kept. */
+export async function saveTemplate(id: EmailTrigger, content: Record<Lang, EmailContent>, note: string): Promise<EmailTemplate> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  const tpl = db.templates.find((x) => x.id === id);
+  if (!tpl) throw new ApiError('not_found');
+  const clean = cleanContent(content, id);
+  tpl.content = clean;
+  tpl.versions.unshift({ n: (tpl.versions[0]?.n ?? 0) + 1, savedAt: new Date().toISOString(), savedBy: admin.fullName, note: note.trim().slice(0, 120), content: clone(clean) });
+  tpl.versions = tpl.versions.slice(0, 30);
+  audit(admin, `Email template “${id}” saved as version ${tpl.versions[0].n}${note.trim() ? `: ${note.trim()}` : ''}`);
+  commit();
+  return clone(tpl);
+}
+
+/** Rollback never deletes history: the old content comes back as a new version. */
+export async function restoreTemplateVersion(id: EmailTrigger, n: number): Promise<EmailTemplate> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  const tpl = db.templates.find((x) => x.id === id);
+  const v = tpl?.versions.find((x) => x.n === n);
+  if (!tpl || !v) throw new ApiError('not_found');
+  tpl.content = clone(v.content);
+  tpl.versions.unshift({ n: tpl.versions[0].n + 1, savedAt: new Date().toISOString(), savedBy: admin.fullName, note: `Restored version ${n}`, content: clone(v.content) });
+  tpl.versions = tpl.versions.slice(0, 30);
+  audit(admin, `Email template “${id}” rolled back to version ${n}`);
+  commit();
+  return clone(tpl);
+}
+
+export async function setTemplateEnabled(id: EmailTrigger, enabled: boolean) {
+  await latency();
+  const admin = requirePerm('email.manage');
+  const tpl = db.templates.find((x) => x.id === id);
+  if (!tpl) throw new ApiError('not_found');
+  tpl.enabled = enabled;
+  audit(admin, `Email “${id}” switched ${enabled ? 'on' : 'off'}`);
+  commit();
+}
+
+/** Sample values for previews and test sends. */
+export function sampleVars(lang: Lang): Record<string, string> {
+  const o = db.orders.find((x) => x.channel === 'online') ?? db.orders[0];
+  const u = db.users.find((x) => x.id === o?.userId) ?? db.users.find((x) => x.role === 'reseller')!;
+  return {
+    ...(o ? orderVars(db, o, u, lang) : baseVars(db, u, lang)),
+    amount: eur(o?.totalCents ?? 12345, lang), receipt_number: 'RC-2026-000123', receipt_link: `${location.origin}/receipt/demo`, balance: eur(0, lang),
+    reason: lang === 'it' ? 'prodotto non più disponibile' : 'product no longer available', unsubscribe_link: `${location.origin}/account#emails`,
+  };
+}
+
+export async function emailPreviewOrder(): Promise<Order | null> {
+  requireStaff();
+  return clone(db.orders.find((x) => x.channel === 'online') ?? null);
+}
+
+export async function sendTestEmail(to: string, content: EmailContent, lang: Lang, kind: EmailTrigger | 'campaign'): Promise<EmailLog> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  if (rules.email(to)) throw new ApiError('field_invalid', { field: 'email' });
+  const clean = cleanContent({ en: content, it: content }, kind)[lang];
+  const o = db.orders.find((x) => x.channel === 'online');
+  const rendered = compose(db, { ...clean, subject: `[TEST] ${clean.subject}` }, lang, sampleVars(lang), o);
+  const log = makeLog(db, uid('e'), 'test', to.trim(), admin.fullName, rendered, new Date());
+  logEmail(log);
+  commit();
+  return clone(log);
+}
+
+export async function emailLogs(): Promise<EmailLog[]> {
+  await latency();
+  requirePerm('email.manage');
+  return clone(db.emails);
+}
+
+/** Tries a failed or bounced email again with the same content (MAIL-06). */
+export async function resendEmail(id: string): Promise<EmailLog> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  const old = db.emails.find((e) => e.id === id);
+  if (!old) throw new ApiError('not_found');
+  const log: EmailLog = { ...clone(old), id: uid('e'), at: new Date().toISOString(), ...simulateDelivery(db.settings, old.to, new Date()) };
+  if (log.status === 'delivered') log.error = undefined;
+  logEmail(log);
+  audit(admin, `Resent “${old.subject}” to ${old.to}: ${log.status}`);
+  commit();
+  return clone(log);
+}
+
+/* SMTP (MAIL-01): the password is write-only. */
+
+export async function saveSmtp(input: Omit<SmtpSettings, 'passwordSet'>) {
+  await latency();
+  const admin = requirePerm('email.manage');
+  if (input.enabled && (!input.host.trim() || !input.fromEmail.trim())) throw new ApiError('smtp_incomplete');
+  if (!(Number.isInteger(input.port) && input.port > 0 && input.port < 65536)) throw new ApiError('smtp_port');
+  if (input.fromEmail.trim() && rules.email(input.fromEmail)) throw new ApiError('field_invalid', { field: 'email' });
+  if (input.replyTo.trim() && rules.email(input.replyTo)) throw new ApiError('field_invalid', { field: 'email' });
+  const prev = db.settings.smtp;
+  const password = input.password ? input.password : prev.password;
+  db.settings.smtp = {
+    enabled: input.enabled, host: input.host.trim(), port: input.port, security: input.security, username: input.username.trim(), password,
+    passwordSet: !!password || prev.passwordSet, fromName: input.fromName.trim(), fromEmail: input.fromEmail.trim(), replyTo: input.replyTo.trim(),
+  };
+  audit(admin, `SMTP settings saved: ${input.enabled ? 'on' : 'off'}, ${input.host}:${input.port} (${input.security})${input.password ? ', password changed' : ''}`);
+  commit();
+}
+
+export async function testSmtp(to: string): Promise<EmailLog> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  if (rules.email(to)) throw new ApiError('field_invalid', { field: 'email' });
+  const s = db.settings.smtp;
+  const html = `<p style="font-family:sans-serif">SMTP test from ${s.fromName} &lt;${s.fromEmail}&gt; via ${s.host}:${s.port} (${s.security.toUpperCase()}).</p>`;
+  const log = makeLog(db, uid('e'), 'test', to.trim(), admin.fullName, { subject: 'SMTP connection test', html }, new Date());
+  logEmail(log);
+  commit();
+  return clone(log);
+}
+
+/* Announcements (MAIL-07). */
+
+function audienceUsers(a: Audience): User[] {
+  const approved = db.users.filter((u) => u.role === 'reseller' && u.state === 'approved');
+  switch (a.kind) {
+    case 'all': return approved;
+    case 'city': return approved.filter((u) => a.cityIds.includes(u.cityId));
+    case 'poc': return approved.filter((u) => u.pocId && a.staffIds.includes(u.pocId));
+    case 'selected': return approved.filter((u) => a.userIds.includes(u.id));
+  }
+}
+
+export async function audienceSize(a: Audience): Promise<{ recipients: number; optedOut: number }> {
+  requirePerm('email.manage');
+  const users = audienceUsers(a);
+  const out = users.filter((u) => u.marketingOptOut).length;
+  return { recipients: users.length - out, optedOut: out };
+}
+
+export async function campaigns(): Promise<Campaign[]> {
+  await latency();
+  requirePerm('email.manage');
+  return clone(db.campaigns);
+}
+
+export async function sendCampaign(input: { name: string; content: Record<Lang, EmailContent>; audience: Audience }): Promise<Campaign> {
+  await latency();
+  const admin = requirePerm('email.manage');
+  if (!input.name.trim()) throw new ApiError('campaign_name');
+  const clean = cleanContent(input.content, 'campaign');
+  const users = audienceUsers(input.audience);
+  const to = users.filter((u) => !u.marketingOptOut);
+  if (!to.length) throw new ApiError('campaign_empty');
+  const c: Campaign = { id: uid('cmp'), name: input.name.trim().slice(0, 80), content: clean, audience: clone(input.audience), sentAt: new Date().toISOString(), sentBy: admin.fullName, recipients: to.length, skippedOptOut: users.length - to.length };
+  const now = new Date();
+  for (const u of to) {
+    const content = clean[u.lang];
+    // Every announcement carries an unsubscribe link, even if the template forgot it (GDPR / ePrivacy).
+    const withUnsub = /unsubscribe_link/.test(JSON.stringify(content)) ? content : {
+      ...content,
+      blocks: [...content.blocks, { id: 'unsub', type: 'text' as const, html: u.lang === 'it' ? 'Non vuoi più ricevere questi aggiornamenti? <a href="{{unsubscribe_link}}">Annulla l’iscrizione</a>.' : 'Don’t want these updates? <a href="{{unsubscribe_link}}">Unsubscribe</a>.' }],
+    };
+    const vars = { ...baseVars(db, u, u.lang), unsubscribe_link: `${location.origin}/account#emails` };
+    logEmail(makeLog(db, uid('e'), 'campaign', u.email, u.fullName, compose(db, withUnsub, u.lang, vars), now, { campaignId: c.id }));
+  }
+  db.campaigns.unshift(c);
+  audit(admin, `Sent announcement “${c.name}” to ${c.recipients} resellers${c.skippedOptOut ? ` (${c.skippedOptOut} opted out)` : ''}`);
+  commit();
+  return clone(c);
+}
+
+/** Resellers choose whether they get announcements; order and payment emails always go out. */
+export async function setMarketingOptOut(optOut: boolean) {
+  await latency();
+  const u = requireUser();
+  u.marketingOptOut = optOut;
+  audit(u, `${optOut ? 'Unsubscribed from' : 'Subscribed to'} announcements`);
+  commit();
 }
 
 export async function resetDemo() {

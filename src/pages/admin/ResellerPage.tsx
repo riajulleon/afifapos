@@ -2,7 +2,7 @@ import { ArrowLeft, Ban, FileUp, RotateCcw, Trash2 } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate, useParams } from 'react-router';
-import { api, useAdminCities, useAdminOrders, useApi, useReseller } from '../../api/queries';
+import { api, useAdminCities, useAdminOrders, useApi, usePocOptions, useReseller } from '../../api/queries';
 import type { ResellerInput } from '../../api/mockServer';
 import { ApiErrorMessage } from '../../components/ApiErrorMessage';
 import { DocChip } from '../../components/DocViewer';
@@ -153,6 +153,30 @@ function Performance({ user }: { user: User }) {
   );
 }
 
+/** TEAM-01/02: who looks after this reseller and earns commission on its new orders. */
+function PointOfContact({ user }: { user: User }) {
+  const { t } = useTranslation();
+  const can = useCan();
+  const staff = usePocOptions();
+  const assign = useApi(api.assignPoc);
+  const current = staff.data?.find((s) => s.id === user.pocId);
+  return (
+    <Card className="grid gap-3 p-5">
+      <h2 className="font-medium">{t('team.poc')}</h2>
+      {can('resellers.edit') ? (
+        <Select value={user.pocId ?? ''} aria-label={t('team.poc')} disabled={assign.isPending}
+          onChange={async (e) => { await assign.mutateAsync([[user.id], e.target.value || null]); toast({ title: t('team.pocSaved'), tone: 'ok' }); }}>
+          <option value="">{t('team.noContact')}</option>
+          {(staff.data ?? []).filter((s) => s.active || s.id === user.pocId).map((s) => <option key={s.id} value={s.id}>{s.fullName} · {s.roleName} · {s.commissionPct}%</option>)}
+        </Select>
+      ) : <p className="text-sm">{current ? `${current.fullName} · ${current.roleName}` : t('team.noContact')}</p>}
+      {current && <Link to={`/admin/team/${current.id}`} className="text-[13px] underline underline-offset-4">{t('team.seePerformance', { name: current.fullName })}</Link>}
+      <p className="text-[13px] text-muted">{t('team.pocNote')}</p>
+      {assign.error && <ErrorNote><ApiErrorMessage error={assign.error} /></ErrorNote>}
+    </Card>
+  );
+}
+
 export function ResellerPage() {
   const { t } = useTranslation();
   const { id = '' } = useParams();
@@ -185,7 +209,8 @@ export function ResellerPage() {
         {u && (
           <div className="grid gap-5">
             <Documents user={u} />
-            {pending && <Card className="grid gap-2 p-5 text-sm"><p>{t('res.pendingNote')}</p><Link to="/admin/approvals" className="font-medium underline underline-offset-4">{t('res.goApprovals')}</Link></Card>}
+            {!pending && <PointOfContact user={u} />}
+            {pending &&<Card className="grid gap-2 p-5 text-sm"><p>{t('res.pendingNote')}</p><Link to="/admin/approvals" className="font-medium underline underline-offset-4">{t('res.goApprovals')}</Link></Card>}
             {!pending && can('resellers.edit') && (
               <Card className="grid gap-3 p-5">
                 <h2 className="font-medium">{t('res.status')}</h2>

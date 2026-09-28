@@ -2,7 +2,7 @@ import { FileUp, Search, UserPlus } from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import { useAdminCities, useAdminOrders, useResellers } from '../../api/queries';
+import { useAdminCities, useAdminOrders, usePocOptions, useResellers } from '../../api/queries';
 import { PageHeader, Pill, Skeleton } from '../../components/ui';
 import { eur } from '../../domain/money';
 import { formatRome } from '../../domain/romeTime';
@@ -16,6 +16,7 @@ export function ResellersPage() {
   const users = useResellers();
   const orders = useAdminOrders();
   const cities = useAdminCities();
+  const staff = usePocOptions();
   const can = useCan();
   const [q, setQ] = useState('');
   const stats = useMemo(() => {
@@ -52,6 +53,7 @@ export function ResellersPage() {
             <tr className="bg-surface-2 text-left text-[11px] uppercase tracking-[.06em] text-muted">
               <th className="px-4 py-2.5 font-medium">{t('apply.businessName')}</th>
               <th className="px-4 py-2.5 font-medium">{t('apply.city')}</th>
+              <th className="px-4 py-2.5 font-medium">{t('team.poc')}</th>
               <th className="px-4 py-2.5 font-medium">{t('admin.stateCol')}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t('admin.kpi.orders')}</th>
               <th className="px-4 py-2.5 text-right font-medium">{t('admin.lifetime')}</th>
@@ -66,6 +68,7 @@ export function ResellersPage() {
                 <tr key={u.id} className="border-t border-line">
                   <td className="px-4 py-2.5"><Link to={`/admin/resellers/${u.id}`} className="font-medium hover:underline">{u.businessName}</Link><br /><span className="text-muted">{u.fullName} · {u.email}</span></td>
                   <td className="px-4 py-2.5 text-muted">{city?.name} › {city?.zones.find((z) => z.id === u.zoneId)?.name}</td>
+                  <td className="px-4 py-2.5 text-muted">{staff.data?.find((x) => x.id === u.pocId)?.fullName ?? '—'}</td>
                   <td className="px-4 py-2.5"><Pill tone={u.state === 'approved' ? 'ok' : u.state === 'rejected' || u.state === 'suspended' ? 'bad' : 'warn'}>{t(`admin.state.${u.state}`)}</Pill></td>
                   <td className="num px-4 py-2.5 text-right">{s?.count ?? 0}</td>
                   <td className="num px-4 py-2.5 text-right font-medium">{eur(s?.total ?? 0, lang)}</td>

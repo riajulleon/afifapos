@@ -1,3 +1,5 @@
+import { enB } from './en.b';
+
 export const en = {
   common: { back: 'Back', cancel: 'Cancel', case: 'case', close: 'Close', edit: 'Edit', next: 'Next', remove: 'Remove', save: 'Save' },
   nav: { home: 'Home', catalog: 'Catalog', orders: 'Orders', account: 'Account', cart: 'Cart', signOut: 'Sign out', admin: 'Admin console' },
@@ -278,7 +280,12 @@ export const en = {
     body: 'Your role doesn’t include it. Ask an Owner to change your role in Users & roles.',
   },
   perm: {
-    group: { orders: 'Orders and payments', resellers: 'Resellers and approvals', catalog: 'Catalog and deals', settings: 'Rules and settings', system: 'Users and audit' },
+    group: { orders: 'Orders and payments', resellers: 'Resellers and approvals', catalog: 'Catalog and deals', sales: 'POS, team and reports', settings: 'Rules and settings', system: 'Users and audit' },
+    pos_use: 'Use the POS till and take counter payments',
+    pos_discount: 'Give POS discounts above the limit',
+    reports_view: 'See reports and team performance',
+    commissions_manage: 'Manage commission rules and payouts',
+    email_manage: 'Manage email setup, templates and announcements',
     orders_view: 'See orders and invoices',
     orders_edit: 'Edit orders and resend invoice emails',
     orders_status: 'Confirm, ship and complete orders',
@@ -391,6 +398,11 @@ export const en = {
     appearance: 'Preferences',
     language: 'Language',
     theme: 'Theme',
+    emails: 'Emails',
+    announcements: 'Send me announcements and offers',
+    announcementsNote: 'Order, invoice and payment emails are always sent.',
+    subscribed: 'You’ll get announcements',
+    unsubscribed: 'You won’t get announcements any more',
   },
 
   errors: {
@@ -443,6 +455,28 @@ export const en = {
     bad_transition: 'The order is already past that step.',
     deal_price_high: 'The sale price must be below the 1–9 case price.',
     deal_duplicate: 'This product already has a deal on that day.',
+    pos_customer: 'That reseller can’t buy right now. Pick another customer or sell as walk-in.',
+    pos_walkin_delivery: 'Walk-in customers take the goods with them. Pick a reseller to deliver.',
+    pos_walkin_later: 'Walk-in customers pay now. Only resellers can buy on account.',
+    discount_invalid: 'Enter a discount above zero (at most 100%).',
+    discount_reason: 'Say why you’re giving the discount.',
+    discount_limit: 'Discounts above {{max}}% need a manager. Lower the discount or ask for approval.',
+    pos_tendered: 'The cash received must cover the total of {{total}}.',
+    rate_invalid: 'Use a commission rate between 0 and 50%.',
+    payout_nothing: 'Choose payable lines that add up to more than zero.',
+    payout_stale: 'Some of these lines changed or were already paid. Reload and try again.',
+    date_invalid: 'Check the dates.',
+    range_too_long: 'Pick a range of two years or less.',
+    template_subject: 'Write a subject for the {{lang}} version (up to 200 characters).',
+    template_blocks: 'An email needs between 1 and 60 blocks.',
+    template_link: 'The button “{{label}}” needs a link starting with https://, mailto: or a variable.',
+    template_image: 'Images must be uploaded or come from an https:// address.',
+    template_image_size: 'That image is too big for an email. Use one under 1.5 MB.',
+    template_vars: 'This email can’t use {{vars}}. Remove them or pick from the list.',
+    smtp_incomplete: 'Fill in the server and the sender address before switching email on.',
+    smtp_port: 'Use a port between 1 and 65535.',
+    campaign_name: 'Give the announcement a name.',
+    campaign_empty: 'Nobody matches this audience (or they all opted out).',
   },
 
   admin: {
@@ -457,7 +491,7 @@ export const en = {
     noAlerts: 'New orders appear here while this page is open.',
     markRead: 'Mark all read',
     enablePush: 'Get browser alerts when this tab is in the background',
-    nav: { users: 'Users & roles', categories: 'Categories', overview: 'Overview', orders: 'Orders', approvals: 'Approvals', resellers: 'Resellers', catalog: 'Catalog', products: 'Products & VAT', rules: 'Rules', cities: 'Cities & shipping', system: 'System', settings: 'Settings', audit: 'Audit log' },
+    nav: { users: 'Users & roles', categories: 'Categories', overview: 'Overview', orders: 'Orders', approvals: 'Approvals', resellers: 'Resellers', catalog: 'Catalog', products: 'Products & VAT', rules: 'Rules', cities: 'Cities & shipping', system: 'System', settings: 'Settings', audit: 'Audit log', sales: 'Sales', pos: 'POS', team: 'Team', myPerformance: 'My performance', reports: 'Reports', emails: 'Emails' },
     overviewSub: 'Sales so far this month and what needs action.',
     kpi: {
       revenue: 'Revenue this month', orders: 'Orders', avg: 'Average order', awaiting: 'Awaiting payment', approvals: 'Pending approvals',
@@ -479,7 +513,8 @@ export const en = {
     reseller: 'Reseller',
     payment: 'Payment',
     next: { confirmed: 'Confirm order', shipped: 'Mark as shipped', delivered: 'Mark as completed' },
-    cancelConfirm: 'Cancel this order? Stock goes back on the shelf.',
+    cancelConfirm: 'Cancel this order? Goods not yet shipped go back into stock, and the buyer is emailed.',
+    cancelReason: 'Reason (sent to the buyer)',
     cancelYes: 'Yes, cancel order',
     cancelOrder: 'Cancel order',
     resend: 'Resend invoice email',
@@ -508,7 +543,7 @@ export const en = {
     pay: {
       method: 'Paid with', reference: 'Transaction / Reference No.', referenceRequired: 'Enter the transaction or reference number.',
       chosen: 'Chosen at checkout', stillDue: '{{x}} still due', update: 'Record another payment',
-      kind: { bank: 'Bank', paypal: 'PayPal', stripe: 'Stripe', bkash: 'bKash', other: 'Others' },
+      kind: { bank: 'Bank', paypal: 'PayPal', stripe: 'Stripe', bkash: 'bKash', cash: 'Cash', card: 'Card', other: 'Others' },
       refHint: {
         bank: 'Bank CRO or TRN from the transfer receipt', paypal: 'PayPal transaction ID, e.g. 8XY12345AB678901C',
         stripe: 'Stripe payment ID, e.g. pi_3Q…', bkash: 'bKash TrxID, e.g. 9GH7K2LM1P', other: 'Receipt number or who collected it',
@@ -560,7 +595,7 @@ export const en = {
     },
     settings: {
       saved: 'Settings saved',
-      tab: { appearance: 'Appearance', footer: 'Footer', pricing: 'Pricing', payments: 'Payments', tax: 'Tax', business: 'Business details', demo: 'Demo data' },
+      tab: { appearance: 'Appearance', footer: 'Footer', pricing: 'Pricing', payments: 'Payments', pos: 'POS', tax: 'Tax', business: 'Business details', demo: 'Demo data' },
       brandName: 'Brand name', siteTitle: 'Site title', sender: 'Email sender name',
       logoLight: 'Logo, light theme', logoDark: 'Logo, dark theme (optional)', upload: 'Upload', noLogo: 'No logo: the brand initial is shown',
       logoType: 'Use a PNG or SVG file.', logoSize: 'Logos must be 2 MB or smaller.',
@@ -576,4 +611,5 @@ export const en = {
     },
     auditSub: 'Every settings change, approval, deal edit and payment, newest first.',
   },
+  ...enB,
 };

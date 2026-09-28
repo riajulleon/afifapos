@@ -1,7 +1,7 @@
-import { CreditCard, Landmark, Smartphone, Wallet, type LucideProps } from 'lucide-react';
+import { Banknote, CreditCard, Landmark, Smartphone, Wallet, type LucideProps } from 'lucide-react';
 import type { PaymentKind } from '../domain/types';
 
-const icons = { bank: Landmark, paypal: Wallet, stripe: CreditCard, bkash: Smartphone, other: Wallet };
+const icons = { bank: Landmark, paypal: Wallet, stripe: CreditCard, bkash: Smartphone, cash: Banknote, card: CreditCard, other: Wallet };
 
 export function PaymentIcon({ kind, ...props }: { kind: PaymentKind } & LucideProps) {
   const Icon = icons[kind] ?? Wallet;

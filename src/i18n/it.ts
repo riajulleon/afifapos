@@ -1,4 +1,5 @@
 import type { en } from './en';
+import { itB } from './it.b';
 
 type Shape<T> = { [K in keyof T]: T[K] extends string ? string : Shape<T[K]> };
 
@@ -282,7 +283,12 @@ export const it: Shape<typeof en> = {
     body: 'Il tuo ruolo non la include. Chiedi a un Titolare di cambiare il tuo ruolo in Utenti e ruoli.',
   },
   perm: {
-    group: { orders: 'Ordini e pagamenti', resellers: 'Rivenditori e approvazioni', catalog: 'Catalogo e offerte', settings: 'Regole e impostazioni', system: 'Utenti e registro' },
+    group: { orders: 'Ordini e pagamenti', resellers: 'Rivenditori e approvazioni', catalog: 'Catalogo e offerte', sales: 'Cassa, team e report', settings: 'Regole e impostazioni', system: 'Utenti e registro' },
+    pos_use: 'Usare la cassa (POS) e incassare al banco',
+    pos_discount: 'Fare sconti in cassa oltre il limite',
+    reports_view: 'Vedere report e rendimento del team',
+    commissions_manage: 'Gestire regole e pagamenti delle provvigioni',
+    email_manage: 'Gestire email, modelli e comunicazioni',
     orders_view: 'Vedere ordini e fatture',
     orders_edit: 'Modificare ordini e reinviare le fatture',
     orders_status: 'Confermare, spedire e completare ordini',
@@ -395,6 +401,11 @@ export const it: Shape<typeof en> = {
     appearance: 'Preferenze',
     language: 'Lingua',
     theme: 'Tema',
+    emails: 'Email',
+    announcements: 'Inviami comunicazioni e offerte',
+    announcementsNote: 'Le email di ordini, fatture e pagamenti arrivano sempre.',
+    subscribed: 'Riceverai le comunicazioni',
+    unsubscribed: 'Non riceverai più comunicazioni',
   },
 
   errors: {
@@ -447,6 +458,28 @@ export const it: Shape<typeof en> = {
     bad_transition: 'L’ordine ha già superato questa fase.',
     deal_price_high: 'Il prezzo in offerta deve essere inferiore al prezzo 1–9 cartoni.',
     deal_duplicate: 'Questo prodotto ha già un’offerta in quel giorno.',
+    pos_customer: 'Questo rivenditore non può acquistare ora. Scegli un altro cliente o vendi al banco.',
+    pos_walkin_delivery: 'I clienti al banco portano via la merce. Scegli un rivenditore per la consegna.',
+    pos_walkin_later: 'I clienti al banco pagano subito. Solo i rivenditori possono acquistare a credito.',
+    discount_invalid: 'Inserisci uno sconto maggiore di zero (al massimo 100%).',
+    discount_reason: 'Indica il motivo dello sconto.',
+    discount_limit: 'Gli sconti oltre il {{max}}% richiedono un responsabile. Riduci lo sconto o chiedi l’approvazione.',
+    pos_tendered: 'Il contante ricevuto deve coprire il totale di {{total}}.',
+    rate_invalid: 'Usa una provvigione tra 0 e 50%.',
+    payout_nothing: 'Scegli righe pagabili per un totale maggiore di zero.',
+    payout_stale: 'Alcune righe sono cambiate o sono già state pagate. Ricarica e riprova.',
+    date_invalid: 'Controlla le date.',
+    range_too_long: 'Scegli un periodo di massimo due anni.',
+    template_subject: 'Scrivi un oggetto per la versione {{lang}} (fino a 200 caratteri).',
+    template_blocks: 'Un’email deve avere da 1 a 60 blocchi.',
+    template_link: 'Il pulsante “{{label}}” deve avere un link che inizia con https://, mailto: o una variabile.',
+    template_image: 'Le immagini vanno caricate o devono avere un indirizzo https://.',
+    template_image_size: 'L’immagine è troppo grande per un’email. Usane una sotto 1,5 MB.',
+    template_vars: 'Questa email non può usare {{vars}}. Rimuovile o scegli dall’elenco.',
+    smtp_incomplete: 'Inserisci server e mittente prima di attivare le email.',
+    smtp_port: 'Usa una porta tra 1 e 65535.',
+    campaign_name: 'Dai un nome alla comunicazione.',
+    campaign_empty: 'Nessuno corrisponde a questo pubblico (o hanno tutti rinunciato).',
   },
 
   admin: {
@@ -461,7 +494,7 @@ export const it: Shape<typeof en> = {
     noAlerts: 'I nuovi ordini compaiono qui mentre la pagina è aperta.',
     markRead: 'Segna tutti come letti',
     enablePush: 'Ricevi avvisi del browser quando la scheda è in background',
-    nav: { users: 'Utenti e ruoli', categories: 'Categorie', overview: 'Panoramica', orders: 'Ordini', approvals: 'Approvazioni', resellers: 'Rivenditori', catalog: 'Catalogo', products: 'Prodotti e IVA', rules: 'Regole', cities: 'Città e spedizioni', system: 'Sistema', settings: 'Impostazioni', audit: 'Registro attività' },
+    nav: { users: 'Utenti e ruoli', categories: 'Categorie', overview: 'Panoramica', orders: 'Ordini', approvals: 'Approvazioni', resellers: 'Rivenditori', catalog: 'Catalogo', products: 'Prodotti e IVA', rules: 'Regole', cities: 'Città e spedizioni', system: 'Sistema', settings: 'Impostazioni', audit: 'Registro attività', sales: 'Vendite', pos: 'Cassa', team: 'Team', myPerformance: 'I miei risultati', reports: 'Report', emails: 'Email' },
     overviewSub: 'Vendite del mese e cosa richiede attenzione.',
     kpi: {
       revenue: 'Fatturato del mese', orders: 'Ordini', avg: 'Ordine medio', awaiting: 'In attesa di pagamento', approvals: 'Approvazioni in sospeso',
@@ -483,7 +516,8 @@ export const it: Shape<typeof en> = {
     reseller: 'Rivenditore',
     payment: 'Pagamento',
     next: { confirmed: 'Conferma ordine', shipped: 'Segna come spedito', delivered: 'Segna come completato' },
-    cancelConfirm: 'Annullare l’ordine? La merce torna a magazzino.',
+    cancelConfirm: 'Annullare l’ordine? La merce non ancora spedita torna a magazzino e il cliente riceve un’email.',
+    cancelReason: 'Motivo (inviato al cliente)',
     cancelYes: 'Sì, annulla ordine',
     cancelOrder: 'Annulla ordine',
     resend: 'Reinvia email fattura',
@@ -512,7 +546,7 @@ export const it: Shape<typeof en> = {
     pay: {
       method: 'Pagato con', reference: 'N. transazione / riferimento', referenceRequired: 'Inserisci il numero di transazione o di riferimento.',
       chosen: 'Scelto al checkout', stillDue: 'mancano {{x}}', update: 'Registra un altro pagamento',
-      kind: { bank: 'Banca', paypal: 'PayPal', stripe: 'Stripe', bkash: 'bKash', other: 'Altro' },
+      kind: { bank: 'Banca', paypal: 'PayPal', stripe: 'Stripe', bkash: 'bKash', cash: 'Contanti', card: 'Carta', other: 'Altro' },
       refHint: {
         bank: 'CRO o TRN dalla ricevuta del bonifico', paypal: 'ID transazione PayPal, es. 8XY12345AB678901C',
         stripe: 'ID pagamento Stripe, es. pi_3Q…', bkash: 'TrxID bKash, es. 9GH7K2LM1P', other: 'Numero ricevuta o chi ha incassato',
@@ -564,7 +598,7 @@ export const it: Shape<typeof en> = {
     },
     settings: {
       saved: 'Impostazioni salvate',
-      tab: { appearance: 'Aspetto', footer: 'Footer', pricing: 'Prezzi', payments: 'Pagamenti', tax: 'IVA', business: 'Dati aziendali', demo: 'Dati demo' },
+      tab: { appearance: 'Aspetto', footer: 'Footer', pricing: 'Prezzi', payments: 'Pagamenti', pos: 'Cassa', tax: 'IVA', business: 'Dati aziendali', demo: 'Dati demo' },
       brandName: 'Nome del marchio', siteTitle: 'Titolo del sito', sender: 'Nome mittente email',
       logoLight: 'Logo, tema chiaro', logoDark: 'Logo, tema scuro (facoltativo)', upload: 'Carica', noLogo: 'Nessun logo: si vede l’iniziale del marchio',
       logoType: 'Usa un file PNG o SVG.', logoSize: 'Il logo deve pesare al massimo 2 MB.',
@@ -580,4 +614,5 @@ export const it: Shape<typeof en> = {
     },
     auditSub: 'Ogni modifica, approvazione, offerta e pagamento, dal più recente.',
   },
+  ...itB,
 };
