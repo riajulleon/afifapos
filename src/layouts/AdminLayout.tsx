@@ -116,10 +116,53 @@ function SideNav({ onNavigate }: { onNavigate?: () => void }) {
   );
 }
 
-export function AdminLayout() {
+/** Initials button that opens a menu; signing out is an explicit item, never the button itself. */
+function AccountMenu() {
   const { t } = useTranslation();
   const me = useMe();
   const navigate = useNavigate();
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!open) return;
+    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setOpen(false);
+    const onKey = (e: KeyboardEvent) => e.key === 'Escape' && setOpen(false);
+    document.addEventListener('mousedown', close);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', onKey); };
+  }, [open]);
+  const initials = (me.data?.fullName ?? '?').split(' ').map((w) => w[0]).slice(0, 2).join('');
+  const row = 'flex h-9 items-center gap-2.5 rounded-lg px-2.5 text-left text-sm hover:bg-surface-2';
+  return (
+    <div className="relative" ref={ref}>
+      <button type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="menu" aria-label={t('nav.account')} className="grid size-8 place-items-center rounded-full bg-surface-2 text-xs font-bold ring-1 ring-line hover:ring-line-strong">
+        {initials}
+      </button>
+      <AnimatePresence>
+        {open && (
+          <motion.div role="menu" initial={{ opacity: 0, scale: 0.96, y: -4 }} animate={{ opacity: 1, scale: 1, y: 0 }} exit={{ opacity: 0, scale: 0.98 }} transition={{ duration: 0.18 }} className="absolute right-0 top-10 z-40 grid w-60 origin-top-right gap-0.5 rounded-xl border border-line bg-surface p-1.5 shadow-3">
+            <div className="px-2.5 py-2">
+              <p className="truncate text-sm font-medium">{me.data?.fullName}</p>
+              <p className="truncate text-xs text-muted">{me.data?.email}</p>
+            </div>
+            <Link role="menuitem" to="/" onClick={() => setOpen(false)} className={row}><ExternalLink className="size-4" /> {t('admin.viewShop')}</Link>
+            <button
+              role="menuitem"
+              type="button"
+              className={clsx(row, 'text-muted hover:text-fg')}
+              onClick={async () => { setOpen(false); await api.logout(); queryClient.clear(); navigate('/login'); }}
+            >
+              <LogOut className="size-4" /> {t('nav.signOut')}
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
+export function AdminLayout() {
+  const { t } = useTranslation();
   const location = useLocation();
   const [drawer, setDrawer] = useState(false);
   const aside = 'inv flex h-full flex-col gap-2 p-3 [--inv-bg:#000] [--inv-fg:#fff] dark:[--inv-bg:#161616] dark:[--inv-fg:#ededed]';
@@ -149,15 +192,7 @@ export function AdminLayout() {
           <LangSwitch className="hidden sm:inline-flex" />
           <ThemeToggle />
           <BellMenu />
-          <button
-            type="button"
-            title={t('nav.signOut')}
-            className="grid size-8 place-items-center rounded-full bg-surface-2 text-xs font-bold ring-1 ring-line hover:ring-line-strong"
-            onClick={async () => { await api.logout(); queryClient.clear(); navigate('/login'); }}
-            aria-label={t('nav.signOut')}
-          >
-            {me.data ? me.data.fullName.split(' ').map((w) => w[0]).slice(0, 2).join('') : <LogOut className="size-4" />}
-          </button>
+          <AccountMenu />
         </header>
         <motion.main key={location.pathname} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }} className="mx-auto w-full max-w-[1200px] flex-1 px-4 py-6 sm:px-6">
           <Outlet />
